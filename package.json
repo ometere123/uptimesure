@@ -7,14 +7,14 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run lib",
     "contracts:install": "npm --prefix contracts install --no-audit --no-fund",
     "contracts:compile": "npm --prefix contracts run compile",
     "contracts:test": "npm --prefix contracts test"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.56.1",
-    "next": "15.3.0",
+    "next": "15.5.21",
     "react": "19.0.0",
     "react-dom": "19.0.0",
     "viem": "2.37.3"

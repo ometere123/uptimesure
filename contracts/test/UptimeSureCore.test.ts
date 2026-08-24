@@ -93,7 +93,7 @@ describe("UptimeSureCore", function () {
 
     const fail = async (salt: string) => {
       const observedAt = await now();
-      await core.connect(admin).submitObservation(
+      return core.connect(admin).submitObservation(
         1,
         ethers.keccak256(ethers.toUtf8Bytes(`obs-${salt}`)),
         false,
