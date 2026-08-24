@@ -1,0 +1,37 @@
+name: deploy-base-sepolia
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: base-sepolia
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install contract dependencies
+        working-directory: contracts
+        run: npm install --no-audit --no-fund
+      - name: Compile and test before deployment
+        working-directory: contracts
+        run: npm run compile && npm test
+      - name: Deploy UptimeSureCore
+        working-directory: contracts
+        env:
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
+          MONITOR_ADDRESS: ${{ secrets.MONITOR_ADDRESS }}
+          USDC_ADDRESS: 0x036CbD53842c5426634e7929541eC2318f3dCF7c
+        run: npm run deploy:base-sepolia
+      - name: Upload deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: uptimesure-base-sepolia-deployment
+          path: deployments/base-sepolia.json
+          retention-days: 30

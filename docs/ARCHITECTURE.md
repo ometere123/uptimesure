@@ -1,44 +1,74 @@
-# Architecture
+# UptimeSure V1 Architecture
 
-UptimeSure is a long-running Rialo Venus workflow, not a Web2 uptime bot with an on-chain badge.
+UptimeSure is an executable service-guarantee product. Providers fully fund a maximum liability in Circle test USDC on Base Sepolia. Supabase performs deterministic HTTPS checks on a schedule and a restricted monitor key submits bounded observations. The Solidity contract remains authoritative for coverage, thresholds, incidents and payouts.
+
+## Runtime
 
 ```text
-Vercel frontend
+Browser / wallet
       |
-      | wallet / read RPC
       v
-Rialo DevNet program state
+Next.js on Vercel
       |
-      +-- AFTER timer ------------------------+
-      |                                       |
-      v                                       v
-REX / TEE HTTP probe                    workflow callback
-      |                                       |
-      | HTTPS response                        | repeated-failure policy
-      +-------------------------------------->|
-                                              |
-                                      confirmed breach?
-                                         /          \
-                                       no            yes
-                                       |              |
-                                  schedule next   native RLO transfer
-                                                      |
-                                                      v
-                                                beneficiary
+      +------ public reads ------> Supabase Postgres
+      |                                ^
+      |                                |
+      |                          sync-chain Edge Function
+      |                                ^
+      v                                |
+UptimeSureCore.sol <---- observation ---+
+Base Sepolia              ^             |
+      |                   |             |
+      |              monitor-due        |
+      |              Edge Function -----+
+      |                   ^
+      |                   |
+      |              Supabase Cron
+      |
+      v
+Circle Base Sepolia test USDC
 ```
 
-## State machine
+## Authority boundaries
 
-`ACTIVE -> UNHEALTHY -> BREACH_CONFIRMED -> BREACH_PAID` is the failure path. A later healthy observation closes the incident as `RECOVERED` and monitoring continues. Provider controls can pause, resume, run an immediate check, change the interval, retry an unpaid current incident, or shut the workflow down.
+**Base Sepolia contract**
 
-A breach requires consecutive failed observations. REX reports are reduced fail-closed: a strict majority of successful `HEALTHY` observations is required; ties, empty reports, request errors and undecodable outputs count unhealthy.
+- provider and beneficiary
+- endpoint and deterministic monitoring terms
+- fully funded coverage
+- payout per incident and maximum payout count
+- observation replay/spacing/freshness guards
+- consecutive-failure and minimum-outage state
+- incident confirmation/recovery
+- remaining coverage and automatic beneficiary payout
 
-## Settlement model
+**Supabase Edge Functions**
 
-The current DevNet implementation settles in native RLO from the workflow payer. This is provider-funded automatic compensation, not a stablecoin escrow and not an insurance policy. The program caps payout count and amount per incident, prevents a second successful payout for the same open incident, and records failed transfer attempts without killing monitoring.
+- perform real HTTPS GET requests
+- cap timeout and response bytes
+- verify expected status/body fragment/latency
+- calculate evidence hash
+- submit an observation using a key that has only `MONITOR_ROLE`
+- index contract state into public read tables
 
-A production version can replace this settlement adapter with a separately audited escrow or stablecoin rail. That future component is intentionally not faked in this repository.
+**Supabase Postgres**
 
-## No backend
+Postgres is a read model and evidence store. It is not authoritative for funds. Deleting a row does not alter coverage or contract state.
 
-There is no database, cron server, keeper, custom oracle, Fly.io service, Railway instance, or Render worker. Rialo workflow state is authoritative; REX performs external HTTPS work; the static frontend can be hosted on Vercel.
+**Vercel**
+
+Hosts the frontend only. There is no long-running server and no Railway/Cloudflare dependency.
+
+## Monitoring cadence
+
+V1 requires `checkIntervalSecs >= 60`. One Supabase Cron job calls `monitor-due` each minute. The function selects only rows whose `next_check_at <= now()` and processes at most 20 per invocation in groups of five.
+
+This deliberately fits an early free-tier product rather than pretending to support unlimited sub-second monitoring.
+
+## Evidence
+
+Each probe records HTTP status, latency, bounded response SHA-256, error code and observed time. A keccak256 commitment of these fields becomes the `evidenceHash` submitted onchain. The raw bounded body is not stored.
+
+## Funding model
+
+A guarantee cannot be created unless `coverageAmount >= payoutPerIncident * maxPayouts`. The monitor can never choose a recipient. Every breach payout is sent by the contract to the beneficiary fixed at creation.
