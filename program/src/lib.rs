@@ -48,11 +48,6 @@ rialo! {
         }
 
         rex {
-            /// Probe one public HTTPS endpoint inside REX.
-            ///
-            /// A successful health observation requires HTTP 2xx and, when a
-            /// fragment is configured, that fragment to occur in the body.
-            /// The workflow receives only a compact public-safe observation.
             pub fn probe(url: String, expected_fragment: String) -> Result<String, String> {
                 if !url.starts_with("https://") {
                     return Err("https-required".to_string());
@@ -96,7 +91,6 @@ rialo! {
             const MAX_URL_LEN: usize = 512;
             const MAX_FRAGMENT_LEN: usize = 128;
 
-            /// Start one provider-funded service guarantee.
             initiating fn create_guarantee(
                 &mut self,
                 service_name: String,
@@ -163,7 +157,6 @@ rialo! {
                 Ok(())
             }
 
-            /// Timer callback. It asks REX to perform the real HTTP observation.
             handler fn execute_scheduled_check(&mut self) -> ProgramResult {
                 if !self.monitoring_active {
                     msg!("UptimeSure::MonitoringPaused");
@@ -181,8 +174,6 @@ rialo! {
                 Ok(())
             }
 
-            /// Apply a scheduled REX report, settle a newly confirmed breach,
-            /// then arm the next timer without trying to catch up missed ticks.
             handler fn handle_scheduled_probe(
                 &mut self,
                 beneficiary: Pubkey,
@@ -206,8 +197,6 @@ rialo! {
                 Ok(())
             }
 
-            /// Owner-only immediate probe. This does not create an extra timer;
-            /// the existing scheduled cadence remains authoritative.
             control fn run_check_now(&mut self) -> ProgramResult {
                 self.require_owner()?;
                 let url = self.endpoint_url.clone();
@@ -230,8 +219,6 @@ rialo! {
                 self.apply_probe_report(beneficiary, &report)
             }
 
-            /// Pause future monitoring. An already registered callback may still
-            /// arrive, but it will not arm another timer while paused.
             control fn pause_monitoring(&mut self) -> ProgramResult {
                 self.require_owner()?;
                 self.monitoring_active = false;
@@ -240,7 +227,6 @@ rialo! {
                 Ok(())
             }
 
-            /// Resume from now instead of replaying a missed timer backlog.
             control fn resume_monitoring(&mut self) -> ProgramResult {
                 self.require_owner()?;
                 if self.monitoring_active {
@@ -265,7 +251,6 @@ rialo! {
                 Ok(())
             }
 
-            /// Retry settlement for the currently open, unpaid incident.
             control fn retry_current_payout(&mut self, beneficiary: Pubkey) -> ProgramResult {
                 self.require_owner()?;
                 if beneficiary != self.beneficiary || !self.incident_open || self.current_incident_paid {
@@ -350,8 +335,6 @@ rialo! {
                 self.last_http_status = observed_status;
                 self.last_body_bytes = observed_body_bytes;
 
-                // Fail closed: empty/tied reports are unhealthy. A single node
-                // cannot outvote the rest of the report.
                 let healthy = healthy_votes > unhealthy_votes && healthy_votes > 0;
 
                 if healthy {
@@ -394,9 +377,6 @@ rialo! {
                 Ok(())
             }
 
-            /// Settlement deliberately catches CPI failure instead of failing
-            /// the whole health callback. That keeps breach evidence and future
-            /// monitoring alive even if the provider-funded payer is empty.
             fn try_settle_incident(&mut self, beneficiary: Pubkey) -> ProgramResult {
                 if beneficiary != self.beneficiary
                     || !self.incident_open
@@ -445,16 +425,15 @@ rialo! {
                 Ok(())
             }
 
-            /// Reject obvious local/private destinations before a workflow is
-            /// created. This is defense-in-depth; production deployments must
-            /// additionally rely on REX egress policy/DNS controls against DNS
-            /// rebinding.
             fn endpoint_allowed(&self, url: &str) -> bool {
                 let lower = url.to_ascii_lowercase();
                 if !lower.starts_with("https://") {
                     return false;
                 }
                 let authority = lower[8..].split('/').next().unwrap_or("");
+                if authority.contains('[') || authority.contains(']') {
+                    return false;
+                }
                 let host = authority.split('@').last().unwrap_or("").split(':').next().unwrap_or("");
                 if host.is_empty()
                     || host == "localhost"
@@ -464,10 +443,6 @@ rialo! {
                     || host.starts_with("10.")
                     || host.starts_with("192.168.")
                     || host.starts_with("169.254.")
-                    || host == "::1"
-                    || host.starts_with("fc")
-                    || host.starts_with("fd")
-                    || host.starts_with("fe80")
                 {
                     return false;
                 }
@@ -481,8 +456,6 @@ rialo! {
                 true
             }
 
-            /// Rialo's clock has appeared in both seconds and milliseconds in
-            /// public examples. Normalize it before using absolute AFTER times.
             fn now_unix_secs(&self) -> u64 {
                 let ts = self.unix_timestamp() as u64;
                 if ts > 100_000_000_000 { ts / 1000 } else { ts }
