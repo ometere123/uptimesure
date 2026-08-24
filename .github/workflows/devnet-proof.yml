@@ -77,6 +77,7 @@ jobs:
           # keystore/key passwords keep this disposable DevNet account
           # usable non-interactively without putting a password in CI.
           printf '\n\n' | rialo keytool generate uptimesure-ci
+          printf '\n\n' | rialo keytool generate uptimesure-rex-ci
 
       - name: Fund DevNet deployer
         shell: bash
@@ -96,7 +97,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          rialo client program deploy-venus . 2>&1 | tee ../devnet-deploy.log
+          rialo client program deploy-venus . \
+            --keypair "$HOME/.config/rialo/uptimesure-ci.keypair" \
+            --rex-keypair "$HOME/.config/rialo/uptimesure-rex-ci.keypair" \
+            2>&1 | tee ../devnet-deploy.log
 
       - name: Collect proof artifacts
         if: always()
