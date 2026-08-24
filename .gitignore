@@ -1,0 +1,22 @@
+# Rust
+target/
+program/target/
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Rialo local tooling / keys
+.rialo/
+*.keypair
+*.wallet
+
+# Proof outputs
+proof/
+*.log
+
+# editors / OS
+.vscode/
+.DS_Store
+Thumbs.db

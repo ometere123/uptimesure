@@ -1,0 +1,111 @@
+name: rialo-devnet-proof
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "program/**"
+      - "scripts/devnet-smoke.sh"
+      - ".github/workflows/devnet-proof.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  devnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RIALO_HOME: ${{ github.workspace }}/.rialo
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install rialoman
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fsSL https://rialo-artifacts.s3.us-east-2.amazonaws.com/rialoman/stable/install.sh | bash
+          echo "$RIALO_HOME/bin" >> "$GITHUB_PATH"
+          "$RIALO_HOME/bin/rialoman" --version
+
+      - name: Install pinned Rialo toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rialoman install stable@0.10.1
+          rialoman use stable@0.10.1
+          rialoman current
+          rialoman which rialo
+          rialo --version
+
+      - name: Stock-Rust type check
+        run: cargo check --manifest-path program/Cargo.toml
+
+      - name: Build deployable PolkaVM and REX component
+        run: cargo build --manifest-path program/artifact/Cargo.toml
+
+      - name: Verify generated Venus interface
+        shell: bash
+        run: |
+          set -euxo pipefail
+          find program/wit -maxdepth 1 -type f -print
+          test -f program/wit/uptimesure-program-manifest.json
+
+      - name: Configure Rialo DevNet
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rialo config network switch devnet
+          rialo config network current || true
+
+      - name: Generate fresh unlocked DevNet-only keypair
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if rialo keytool generate --no-password; then
+            echo "generated key with --no-password"
+          else
+            printf '\n' | rialo keytool generate
+          fi
+
+      - name: Fund DevNet deployer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rialo client airdrop --amount 1
+          rialo client airdrop --amount 1
+
+      - name: Deploy UptimeSure to Rialo DevNet
+        working-directory: program
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rialo client program deploy-venus . 2>&1 | tee ../devnet-deploy.log
+
+      - name: Collect proof artifacts
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p proof
+          cp -f devnet-deploy.log proof/ 2>/dev/null || true
+          cp -f program/wit/*.json proof/ 2>/dev/null || true
+          cp -f program/wit/*.wit proof/ 2>/dev/null || true
+          {
+            echo "source_commit=${GITHUB_SHA}"
+            echo "rialo_version=$(rialo --version 2>/dev/null || true)"
+            echo "rialoman=$(rialoman current 2>/dev/null || true)"
+            echo "generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > proof/build-meta.txt
+
+      - name: Upload DevNet proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uptimesure-devnet-proof
+          path: proof
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,119 @@
+name: create-devnet-guarantee
+
+on:
+  workflow_dispatch:
+    inputs:
+      program_id:
+        description: "Deployed UptimeSure program ID"
+        required: true
+        type: string
+      service_name:
+        description: "Service name"
+        required: true
+        default: "UptimeSure Demo"
+        type: string
+      endpoint_url:
+        description: "Public HTTPS health endpoint"
+        required: true
+        default: "https://example.com"
+        type: string
+      expected_fragment:
+        description: "Optional body fragment"
+        required: false
+        default: "Example Domain"
+        type: string
+      beneficiary:
+        description: "Rialo beneficiary pubkey"
+        required: true
+        type: string
+      check_interval_secs:
+        description: "15..86400"
+        required: true
+        default: "30"
+        type: string
+      failure_threshold:
+        description: "2..20 consecutive failures"
+        required: true
+        default: "2"
+        type: string
+      compensation_kelvin:
+        description: "Native DevNet RLO amount in kelvin"
+        required: true
+        default: "1000000"
+        type: string
+      max_payouts:
+        description: "1..100"
+        required: true
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RIALO_HOME: ${{ github.workspace }}/.rialo
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate endpoint input
+        shell: bash
+        env:
+          ENDPOINT_URL: ${{ inputs.endpoint_url }}
+        run: |
+          set -euo pipefail
+          case "$ENDPOINT_URL" in
+            https://*) ;;
+            *) echo "endpoint must use https://" >&2; exit 1 ;;
+          esac
+      - name: Install Rialo toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -fsSL https://rialo-artifacts.s3.us-east-2.amazonaws.com/rialoman/stable/install.sh | bash
+          echo "$RIALO_HOME/bin" >> "$GITHUB_PATH"
+          "$RIALO_HOME/bin/rialoman" install stable@0.10.1
+          "$RIALO_HOME/bin/rialoman" use stable@0.10.1
+      - name: Configure fresh DevNet payer
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rialo config network switch devnet
+          if rialo keytool generate --no-password; then :; else printf '\n' | rialo keytool generate; fi
+          rialo client airdrop --amount 1
+          rialo client airdrop --amount 1
+      - name: Create real guarantee workflow
+        shell: bash
+        env:
+          PROGRAM_ID: ${{ inputs.program_id }}
+          SERVICE_NAME: ${{ inputs.service_name }}
+          ENDPOINT_URL: ${{ inputs.endpoint_url }}
+          EXPECTED_FRAGMENT: ${{ inputs.expected_fragment }}
+          BENEFICIARY: ${{ inputs.beneficiary }}
+          CHECK_INTERVAL: ${{ inputs.check_interval_secs }}
+          FAILURE_THRESHOLD: ${{ inputs.failure_threshold }}
+          COMPENSATION: ${{ inputs.compensation_kelvin }}
+          MAX_PAYOUTS: ${{ inputs.max_payouts }}
+        run: |
+          set -euxo pipefail
+          rialo client program invoke "$PROGRAM_ID" --program-dir program \
+            --function create_guarantee \
+            --arg workflow_pda_slug=random \
+            --arg service_name="$SERVICE_NAME" \
+            --arg endpoint_url="$ENDPOINT_URL" \
+            --arg expected_fragment="$EXPECTED_FRAGMENT" \
+            --arg beneficiary="$BENEFICIARY" \
+            --arg check_interval_secs="$CHECK_INTERVAL" \
+            --arg failure_threshold="$FAILURE_THRESHOLD" \
+            --arg compensation_kelvin="$COMPENSATION" \
+            --arg max_payouts="$MAX_PAYOUTS" 2>&1 | tee create-guarantee.log
+      - name: Upload transaction proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uptimesure-create-guarantee-proof
+          path: create-guarantee.log
+          if-no-files-found: warn
+          retention-days: 30

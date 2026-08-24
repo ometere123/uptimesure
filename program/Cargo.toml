@@ -1,0 +1,39 @@
+[package]
+name = "uptimesure-program"
+version = "0.1.0"
+edition = "2021"
+description = "UptimeSure: executable API uptime guarantees on Rialo Venus/REX"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+implementation = []
+
+[dependencies]
+rialo-s-program = { version = "0.10.1", default-features = false }
+rialo-s-program-error = { version = "0.10.1", features = ["borsh"] }
+rialo-venus = { version = "0.10.1" }
+rialo-venus-proc-macro = { version = "0.10.1" }
+serde = { version = "1.0.219", features = ["derive", "rc"] }
+serde_json = { version = "1.0.143", features = ["alloc", "preserve_order", "raw_value"] }
+
+[lints.rust]
+future_incompatible = "warn"
+nonstandard_style = "warn"
+rust_2018_idioms = "warn"
+unsafe_code = "warn"
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = [
+  'cfg(target_feature, values("static-syscalls"))',
+  'cfg(target_os, values("solana"))',
+  'cfg(feature, values("frozen-abi", "no-entrypoint", "custom-panic", "custom-heap"))',
+  'cfg(msim)',
+  'cfg(fail_points)',
+  'cfg(rialo_simtest_seed_sweep)',
+  'cfg(bazel)',
+]

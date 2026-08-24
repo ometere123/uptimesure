@@ -1,0 +1,51 @@
+// WIT interface vendored from the public Rialo rex-wasm-pipeline example.
+package rialo:rex-component@0.1.0;
+
+interface rex {
+    execute: func(input: list<u8>) -> result<string, string>;
+}
+
+interface websocket {
+    type connection = u32;
+    record message {
+        data: list<u8>,
+        is-binary: bool,
+    }
+    connect: func(url: string) -> result<connection, string>;
+    send: func(conn: connection, data: list<u8>, is-binary: bool) -> result<_, string>;
+    receive: func(conn: connection, timeout-ms: u32) -> result<message, string>;
+    close: func(conn: connection) -> result<_, string>;
+}
+
+interface http {
+    record http-response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+    get: func(url: string, headers: list<tuple<string, string>>, timeout-ms: u32) -> result<http-response, string>;
+    post: func(url: string, headers: list<tuple<string, string>>, body: list<u8>, timeout-ms: u32) -> result<http-response, string>;
+}
+
+interface time {
+    now: func() -> result<s64, string>;
+}
+
+interface logging {
+    enum log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+    log: func(level: log-level, message: string);
+}
+
+world rex-world {
+    import websocket;
+    import http;
+    import time;
+    import logging;
+    export rex;
+}
