@@ -3,6 +3,9 @@ import { parseEventLogs } from "npm:viem@2.37.3";
 import { authorizedCron, json } from "../_shared/auth.ts";
 import { contractAddress, coreAbi, eventAbi, publicClient } from "../_shared/chain.ts";
 
+const LOG_CHUNK = 1_000n;
+const MAX_BLOCKS_PER_RUN = 5_000n;
+
 function adminClient() {
   const url = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -56,18 +59,23 @@ export default {
     const client = publicClient();
     const latest = await client.getBlockNumber();
     const safeLatest = latest > 2n ? latest - 2n : latest;
-    const { data: state } = await supabase.from("chain_sync_state").select("last_synced_block").eq("id", 1).single();
+    const { data: state, error: stateError } = await supabase.from("chain_sync_state").select("last_synced_block").eq("id", 1).single();
+    if (stateError) return json({ error: `sync_state:${stateError.message}` }, 500);
+
     let fromBlock = state?.last_synced_block == null ? deployBlock : BigInt(state.last_synced_block) + 1n;
     if (fromBlock < deployBlock) fromBlock = deployBlock;
-    if (fromBlock > safeLatest) return json({ synced: 0, latest: safeLatest.toString() });
+    if (fromBlock > safeLatest) return json({ synced: 0, latest: safeLatest.toString(), caughtUp: true });
 
+    const maxToBlock = fromBlock + MAX_BLOCKS_PER_RUN - 1n;
+    const targetLatest = maxToBlock < safeLatest ? maxToBlock : safeLatest;
     const touchedGuarantees = new Set<string>();
     const touchedIncidents = new Set<string>();
     let observationEvents = 0;
     let cursor = fromBlock;
 
-    while (cursor <= safeLatest) {
-      const toBlock = cursor + 999n > safeLatest ? safeLatest : cursor + 999n;
+    while (cursor <= targetLatest) {
+      const chunkEnd = cursor + LOG_CHUNK - 1n;
+      const toBlock = chunkEnd > targetLatest ? targetLatest : chunkEnd;
       const logs = await client.getLogs({ address: contractAddress(), fromBlock: cursor, toBlock });
       const parsed = parseEventLogs({ abi: eventAbi, logs, strict: false });
       for (const log of parsed) {
@@ -77,7 +85,7 @@ export default {
         if (log.eventName === "ObservationRecorded") {
           observationEvents++;
           const observationId = String(args.observationId);
-          await supabase.from("observations").upsert({
+          const indexed = await supabase.from("observations").upsert({
             observation_id: observationId,
             guarantee_id: Number(args.guaranteeId),
             observed_at: iso(args.observedAt as bigint),
@@ -86,6 +94,7 @@ export default {
             tx_hash: log.transactionHash,
             tx_status: "indexed",
           }, { onConflict: "observation_id", ignoreDuplicates: true });
+          if (indexed.error) throw indexed.error;
         }
       }
       cursor = toBlock + 1n;
@@ -94,10 +103,17 @@ export default {
     for (const id of touchedGuarantees) await syncGuarantee(BigInt(id));
     for (const id of touchedIncidents) await syncIncident(BigInt(id));
 
-    await supabase.from("chain_sync_state").upsert({ id: 1, last_synced_block: safeLatest.toString(), updated_at: new Date().toISOString() });
+    const saved = await supabase.from("chain_sync_state").upsert({ id: 1, last_synced_block: targetLatest.toString(), updated_at: new Date().toISOString() });
+    if (saved.error) throw saved.error;
+
     return json({
-      fromBlock: fromBlock.toString(), toBlock: safeLatest.toString(), guarantees: touchedGuarantees.size,
-      incidents: touchedIncidents.size, observations: observationEvents,
+      fromBlock: fromBlock.toString(),
+      toBlock: targetLatest.toString(),
+      networkSafeHead: safeLatest.toString(),
+      caughtUp: targetLatest >= safeLatest,
+      guarantees: touchedGuarantees.size,
+      incidents: touchedIncidents.size,
+      observations: observationEvents,
     });
   },
 };
