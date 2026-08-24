@@ -190,9 +190,21 @@ jobs:
             done
             test "$status" -eq 0
           done
-          sleep 90
-          rialo client get-workflow-lineage "$CHECK_SIGNATURE" --full-id true 2>&1 | tee ../proof/run-check-lineage-after-wait.log
-          grep -Eq 'Total nodes: ([2-9]|[1-9][0-9]+)' ../proof/run-check-lineage-after-wait.log
+          lineage_found=1
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 60
+            output="../proof/run-check-lineage-after-wait-$attempt.log"
+            set +e
+            rialo client get-workflow-lineage "$CHECK_SIGNATURE" --full-id true 2>&1 | tee "$output"
+            lineage_status=${PIPESTATUS[0]}
+            set -e
+            if [ "$lineage_status" -eq 0 ] && grep -Eq 'Total nodes: ([2-9]|[1-9][0-9]+)' "$output"; then
+              cp "$output" ../proof/run-check-lineage-after-wait.log
+              lineage_found=0
+              break
+            fi
+          done
+          test "$lineage_found" -eq 0
           {
             echo "program_id=$PROGRAM_ID"
             echo "rex_bytecode_account=$REX_ACCOUNT"
