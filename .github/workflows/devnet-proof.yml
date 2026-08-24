@@ -29,13 +29,12 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install rialoman
+      - name: Install rialoman non-interactively
         shell: bash
         run: |
           set -euxo pipefail
-          curl -fsSL https://rialo-artifacts.s3.us-east-2.amazonaws.com/rialoman/stable/install.sh | bash
-          echo "$RIALO_HOME/bin" >> "$GITHUB_PATH"
-          "$RIALO_HOME/bin/rialoman" --version
+          cargo install rialoman --version 0.3.0 --locked
+          rialoman --version
 
       - name: Install pinned Rialo toolchain
         shell: bash
