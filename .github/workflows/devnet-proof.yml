@@ -7,6 +7,11 @@ on:
       - "program/**"
       - "scripts/devnet-smoke.sh"
       - ".github/workflows/devnet-proof.yml"
+  pull_request:
+    paths:
+      - "program/**"
+      - "scripts/devnet-smoke.sh"
+      - ".github/workflows/devnet-proof.yml"
   workflow_dispatch:
 
 permissions:
