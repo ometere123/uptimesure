@@ -32,6 +32,28 @@ export async function connectWallet(): Promise<WalletConnection> {
   return { address, wallet };
 }
 
+async function ensureAllowance(connection: WalletConnection, amount: bigint): Promise<`0x${string}` | undefined> {
+  const allowance = await publicClient.readContract({
+    address: USDC_ADDRESS,
+    abi: erc20Abi,
+    functionName: "allowance",
+    args: [connection.address, CORE_ADDRESS],
+  });
+  if (allowance >= amount) return undefined;
+
+  const approvalHash = await connection.wallet.writeContract({
+    account: connection.address,
+    chain: baseSepolia,
+    address: USDC_ADDRESS,
+    abi: erc20Abi,
+    functionName: "approve",
+    args: [CORE_ADDRESS, amount],
+  });
+  const approvalReceipt = await publicClient.waitForTransactionReceipt({ hash: approvalHash });
+  if (approvalReceipt.status !== "success") throw new Error("USDC approval failed.");
+  return approvalHash;
+}
+
 export async function createGuarantee(
   connection: WalletConnection,
   input: {
@@ -50,20 +72,7 @@ export async function createGuarantee(
   }
 ): Promise<{ approvalHash?: `0x${string}`; createHash: `0x${string}`; guaranteeId?: bigint }> {
   if (!hasDeployment()) throw new Error("UptimeSure contract has not been deployed yet.");
-  const allowance = await publicClient.readContract({ address: USDC_ADDRESS, abi: erc20Abi, functionName: "allowance", args: [connection.address, CORE_ADDRESS] });
-  let approvalHash: `0x${string}` | undefined;
-  if (allowance < input.coverageAmount) {
-    approvalHash = await connection.wallet.writeContract({
-      account: connection.address,
-      chain: baseSepolia,
-      address: USDC_ADDRESS,
-      abi: erc20Abi,
-      functionName: "approve",
-      args: [CORE_ADDRESS, input.coverageAmount],
-    });
-    const approvalReceipt = await publicClient.waitForTransactionReceipt({ hash: approvalHash });
-    if (approvalReceipt.status !== "success") throw new Error("USDC approval failed.");
-  }
+  const approvalHash = await ensureAllowance(connection, input.coverageAmount);
 
   const createHash = await connection.wallet.writeContract({
     account: connection.address,
@@ -91,4 +100,43 @@ export async function createGuarantee(
   const logs = parseEventLogs({ abi: coreAbi, logs: receipt.logs, eventName: "GuaranteeCreated", strict: false });
   const guaranteeId = logs[0]?.args.guaranteeId;
   return { approvalHash, createHash, guaranteeId };
+}
+
+export async function topUpGuarantee(
+  connection: WalletConnection,
+  guaranteeId: bigint,
+  amount: bigint,
+): Promise<{ approvalHash?: `0x${string}`; topUpHash: `0x${string}` }> {
+  if (!hasDeployment()) throw new Error("UptimeSure contract has not been deployed yet.");
+  if (amount <= 0n) throw new Error("Top-up amount must be greater than zero.");
+  const approvalHash = await ensureAllowance(connection, amount);
+  const topUpHash = await connection.wallet.writeContract({
+    account: connection.address,
+    chain: baseSepolia,
+    address: CORE_ADDRESS,
+    abi: coreAbi,
+    functionName: "topUp",
+    args: [guaranteeId, amount],
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: topUpHash });
+  if (receipt.status !== "success") throw new Error("Coverage top-up reverted.");
+  return { approvalHash, topUpHash };
+}
+
+export async function withdrawExpiredGuarantee(
+  connection: WalletConnection,
+  guaranteeId: bigint,
+): Promise<`0x${string}`> {
+  if (!hasDeployment()) throw new Error("UptimeSure contract has not been deployed yet.");
+  const hash = await connection.wallet.writeContract({
+    account: connection.address,
+    chain: baseSepolia,
+    address: CORE_ADDRESS,
+    abi: coreAbi,
+    functionName: "withdrawExpired",
+    args: [guaranteeId],
+  });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") throw new Error("Expired coverage withdrawal reverted.");
+  return hash;
 }
