@@ -181,7 +181,7 @@ contract UptimeSureCore is AccessControl, Pausable, ReentrancyGuard {
 
     function topUp(uint256 guaranteeId, uint256 amount) external whenNotPaused nonReentrant {
         Guarantee storage g = _guarantees[guaranteeId];
-        if (!g.active || g.withdrawn) revert GuaranteeNotActive();
+        if (!g.active || g.withdrawn || block.timestamp > g.expiresAt) revert GuaranteeNotActive();
         if (msg.sender != g.provider) revert UnauthorizedProvider();
         if (amount == 0) revert InvalidTerms();
 
