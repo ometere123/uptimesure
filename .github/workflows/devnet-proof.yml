@@ -96,6 +96,7 @@ jobs:
         working-directory: program
         shell: bash
         run: |
+          set +e
           set -uo pipefail
           status=1
           for attempt in 1 2 3; do
