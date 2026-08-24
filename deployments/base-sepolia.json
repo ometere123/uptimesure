@@ -8,6 +8,7 @@
   "deploymentBlock": null,
   "monitorAddress": null,
   "monitorGrantTransaction": null,
+  "deployerMonitorRenounceTransaction": null,
   "deployedAt": null,
   "status": "awaiting-deployment"
 }
