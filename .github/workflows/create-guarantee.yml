@@ -58,6 +58,7 @@ jobs:
       RIALO_HOME: ${{ github.workspace }}/.rialo
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Validate endpoint input
         shell: bash
         env:
@@ -72,10 +73,11 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          curl -fsSL https://rialo-artifacts.s3.us-east-2.amazonaws.com/rialoman/stable/install.sh | bash
-          echo "$RIALO_HOME/bin" >> "$GITHUB_PATH"
-          "$RIALO_HOME/bin/rialoman" install stable@0.10.1
-          "$RIALO_HOME/bin/rialoman" use stable@0.10.1
+          cargo install rialoman --version 0.3.0 --locked
+          rialoman install stable@0.10.1
+          rialoman use stable@0.10.1
+          rialoman current
+          rialo --version
       - name: Configure fresh DevNet payer
         shell: bash
         run: |
