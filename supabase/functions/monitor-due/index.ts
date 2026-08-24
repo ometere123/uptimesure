@@ -83,7 +83,8 @@ function hex(bytes: Uint8Array): `0x${string}` {
 }
 
 async function sha256(bytes: Uint8Array): Promise<`0x${string}`> {
-  return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
+  const copy = Uint8Array.from(bytes);
+  return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", copy.buffer)));
 }
 
 async function probe(row: GuaranteeRow): Promise<Probe> {
@@ -155,7 +156,7 @@ async function processGuarantee(row: GuaranteeRow) {
       address: contractAddress(),
       abi: coreAbi,
       functionName: "submitObservation",
-      args: [BigInt(row.id), observationId, result.healthy, evidenceHash, observedAt],
+      args: [BigInt(row.id), observationId, result.healthy, evidenceHash, BigInt(observedAt)],
       account,
     });
     txHash = await wallet.writeContract(request);
