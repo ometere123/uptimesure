@@ -8,7 +8,17 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   if (!deployer) throw new Error("No deployer. Set DEPLOYER_PRIVATE_KEY.");
 
+  const monitorAddress = process.env.MONITOR_ADDRESS;
+  if (!monitorAddress || !ethers.isAddress(monitorAddress)) {
+    throw new Error("MONITOR_ADDRESS must be a valid dedicated Base Sepolia monitor wallet.");
+  }
+  if (monitorAddress.toLowerCase() === deployer.address.toLowerCase()) {
+    throw new Error("MONITOR_ADDRESS must be different from the deployer/admin wallet.");
+  }
+
   const usdc = process.env.USDC_ADDRESS || BASE_SEPOLIA_USDC;
+  if (!ethers.isAddress(usdc)) throw new Error("USDC_ADDRESS is invalid.");
+
   const Core = await ethers.getContractFactory("UptimeSureCore");
   const core = await Core.deploy(usdc);
   const deploymentTx = core.deploymentTransaction();
@@ -17,14 +27,15 @@ async function main() {
   const receipt = await deploymentTx.wait();
   if (!receipt) throw new Error("Deployment receipt unavailable");
 
-  const monitorAddress = process.env.MONITOR_ADDRESS;
-  let monitorGrantTx: string | null = null;
-  if (monitorAddress) {
-    const role = await core.MONITOR_ROLE();
-    const tx = await core.grantRole(role, monitorAddress);
-    await tx.wait();
-    monitorGrantTx = tx.hash;
-  }
+  const role = await core.MONITOR_ROLE();
+  const grantTx = await core.grantRole(role, monitorAddress);
+  await grantTx.wait();
+
+  // The constructor grants MONITOR_ROLE to the deployer so local tests are
+  // convenient. Production-like testnet deployment transfers that power to a
+  // dedicated low-value monitor wallet and removes it from the admin wallet.
+  const renounceTx = await core.renounceRole(role, deployer.address);
+  await renounceTx.wait();
 
   const out = {
     network: "base-sepolia",
@@ -34,8 +45,9 @@ async function main() {
     deployer: deployer.address,
     deploymentTransaction: deploymentTx.hash,
     deploymentBlock: receipt.blockNumber,
-    monitorAddress: monitorAddress || deployer.address,
-    monitorGrantTransaction: monitorGrantTx,
+    monitorAddress,
+    monitorGrantTransaction: grantTx.hash,
+    deployerMonitorRenounceTransaction: renounceTx.hash,
     deployedAt: new Date().toISOString(),
     status: "deployed"
   };
