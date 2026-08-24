@@ -85,6 +85,12 @@ jobs:
           rialo client airdrop --amount 1
           rialo client airdrop --amount 1
 
+      - name: Inspect supported Venus deploy command
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rialo client program deploy-venus --help
+
       - name: Deploy UptimeSure to Rialo DevNet
         working-directory: program
         shell: bash
