@@ -83,14 +83,6 @@ rialo! {
             use rialo_s_program_error::ProgramError;
             use rialo_types::RexOutput;
 
-            const MIN_INTERVAL_SECS: u64 = 15;
-            const MAX_INTERVAL_SECS: u64 = 86_400;
-            const MAX_FAILURE_THRESHOLD: u64 = 20;
-            const MAX_PAYOUTS: u64 = 100;
-            const MAX_SERVICE_NAME_LEN: usize = 96;
-            const MAX_URL_LEN: usize = 512;
-            const MAX_FRAGMENT_LEN: usize = 128;
-
             initiating fn create_guarantee(
                 &mut self,
                 service_name: String,
@@ -105,16 +97,16 @@ rialo! {
                 msg!("UptimeSure::CreateGuarantee service={}", service_name);
 
                 if service_name.is_empty()
-                    || service_name.len() > MAX_SERVICE_NAME_LEN
+                    || service_name.len() > 96
                     || endpoint_url.is_empty()
-                    || endpoint_url.len() > MAX_URL_LEN
-                    || expected_fragment.len() > MAX_FRAGMENT_LEN
+                    || endpoint_url.len() > 512
+                    || expected_fragment.len() > 128
                     || !self.endpoint_allowed(&endpoint_url)
-                    || !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&check_interval_secs)
+                    || !(15..=86_400).contains(&check_interval_secs)
                     || failure_threshold < 2
-                    || failure_threshold > MAX_FAILURE_THRESHOLD
+                    || failure_threshold > 20
                     || max_payouts == 0
-                    || max_payouts > MAX_PAYOUTS
+                    || max_payouts > 100
                 {
                     return Err(ProgramError::InvalidArgument);
                 }
@@ -243,7 +235,7 @@ rialo! {
 
             control fn set_check_interval(&mut self, interval_secs: u64) -> ProgramResult {
                 self.require_owner()?;
-                if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&interval_secs) {
+                if !(15..=86_400).contains(&interval_secs) {
                     return Err(ProgramError::InvalidArgument);
                 }
                 self.check_interval_secs = interval_secs;
