@@ -1,0 +1,29 @@
+{
+  "name": "uptimesure",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "contracts:install": "npm --prefix contracts install --no-audit --no-fund",
+    "contracts:compile": "npm --prefix contracts run compile",
+    "contracts:test": "npm --prefix contracts test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.56.1",
+    "next": "15.3.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "viem": "2.37.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.0.3",
+    "@types/react-dom": "19.0.2",
+    "typescript": "5.7.2",
+    "vitest": "3.2.4"
+  }
+}

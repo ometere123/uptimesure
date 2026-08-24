@@ -1,22 +1,18 @@
-# Rust
-target/
-program/target/
-
-# Frontend
+node_modules/
+.next/
+out/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+coverage/
+contracts/node_modules/
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
 web/node_modules/
 web/dist/
-web/.vite/
-
-# Rialo local tooling / keys
+program/target/
 .rialo/
-*.keypair
-*.wallet
-
-# Proof outputs
 proof/
-*.log
-
-# editors / OS
-.vscode/
-.DS_Store
-Thumbs.db
