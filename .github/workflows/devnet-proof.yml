@@ -73,11 +73,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          if rialo keytool generate --no-password; then
-            echo "generated key with --no-password"
-          else
-            printf '\n' | rialo keytool generate
-          fi
+          # Rialo 0.10.1 takes the account alias positionally. Empty
+          # keystore/key passwords keep this disposable DevNet account
+          # usable non-interactively without putting a password in CI.
+          printf '\n\n' | rialo keytool generate uptimesure-ci
 
       - name: Fund DevNet deployer
         shell: bash

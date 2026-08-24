@@ -86,7 +86,7 @@ jobs:
         run: |
           set -euxo pipefail
           rialo config network switch devnet
-          if rialo keytool generate --no-password; then :; else printf '\n' | rialo keytool generate; fi
+          printf '\n\n' | rialo keytool generate uptimesure-guarantee-ci
           rialo client airdrop --amount 1
           rialo client airdrop --amount 1
       - name: Create real guarantee workflow
