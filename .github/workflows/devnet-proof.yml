@@ -72,11 +72,15 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          mkdir -p proof
           # Rialo 0.10.1 takes the account alias positionally. Empty
           # keystore/key passwords keep this disposable DevNet account
           # usable non-interactively without putting a password in CI.
-          printf '\n\n' | rialo keytool generate uptimesure-ci
-          printf '\n\n' | rialo keytool generate uptimesure-rex-ci
+          printf '\n\n' | rialo keytool generate uptimesure-ci 2>&1 | tee proof/keygen.log
+          printf '\n\n' | rialo keytool generate uptimesure-rex-ci 2>&1 | tee -a proof/keygen.log
+          DEPLOYER_PUBKEY="$(sed -n 's/.*public key: \([^,]*\).*/\1/p' proof/keygen.log | head -n 1)"
+          test -n "$DEPLOYER_PUBKEY"
+          echo "DEPLOYER_PUBKEY=$DEPLOYER_PUBKEY" >> "$GITHUB_ENV"
 
       - name: Fund DevNet deployer
         shell: bash
@@ -115,6 +119,52 @@ jobs:
             fi
           done
           exit "$status"
+
+      - name: Create real healthy guarantee and run an HTTP check
+        if: success()
+        working-directory: program
+        shell: bash
+        env:
+          DEPLOY_LOG: ../devnet-deploy.log
+        run: |
+          set -euo pipefail
+          PROGRAM_ID="$(sed -n 's/^Venus program deployed at //p' "$DEPLOY_LOG" | tail -n 1)"
+          REX_ACCOUNT="$(sed -n 's/^REX components deployed at //p' "$DEPLOY_LOG" | tail -n 1)"
+          test -n "$PROGRAM_ID"
+          test -n "$REX_ACCOUNT"
+          SLUG="$(openssl rand -hex 32)"
+          echo "workflow_slug=$SLUG" | tee ../proof/guarantee-inputs.txt
+          rialo client program invoke "$PROGRAM_ID" --program-dir . \
+            --function create_guarantee \
+            --arg workflow_pda_slug="$SLUG" \
+            --arg service_name="UptimeSure public healthy proof" \
+            --arg endpoint_url="https://example.com" \
+            --arg expected_fragment="Example Domain" \
+            --arg beneficiary="$DEPLOYER_PUBKEY" \
+            --arg check_interval_secs=30 \
+            --arg failure_threshold=2 \
+            --arg compensation_kelvin=0 \
+            --arg max_payouts=1 \
+            --arg __rex_bytecode_account="$REX_ACCOUNT" \
+            --json 2>&1 | tee ../proof/create-guarantee.log
+          rialo client program invoke "$PROGRAM_ID" --program-dir . \
+            --function run_check_now \
+            --arg workflow_pda_slug="$SLUG" \
+            --json 2>&1 | tee ../proof/run-check-now.log
+          TX_SIGNATURE="$(grep -Eo '[1-9A-HJ-NP-Za-km-z]{80,100}' ../proof/create-guarantee.log | head -n 1)"
+          CHECK_SIGNATURE="$(grep -Eo '[1-9A-HJ-NP-Za-km-z]{80,100}' ../proof/run-check-now.log | head -n 1)"
+          test -n "$TX_SIGNATURE"
+          test -n "$CHECK_SIGNATURE"
+          rialo client get-workflow-lineage "$TX_SIGNATURE" --full-id true 2>&1 | tee ../proof/create-guarantee-lineage.log
+          rialo client get-workflow-lineage "$CHECK_SIGNATURE" --full-id true 2>&1 | tee ../proof/run-check-lineage.log
+          {
+            echo "program_id=$PROGRAM_ID"
+            echo "rex_bytecode_account=$REX_ACCOUNT"
+            echo "create_guarantee_signature=$TX_SIGNATURE"
+            echo "run_check_now_signature=$CHECK_SIGNATURE"
+            echo "endpoint=https://example.com"
+            echo "expected_fragment=Example Domain"
+          } > ../proof/guarantee-proof.env
 
       - name: Collect proof artifacts
         if: always()
