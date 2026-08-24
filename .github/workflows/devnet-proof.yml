@@ -67,7 +67,6 @@ jobs:
         run: |
           set -euxo pipefail
           rialo config network switch devnet
-          rialo config network current || true
 
       - name: Generate fresh unlocked DevNet-only keypair
         shell: bash
@@ -83,8 +82,9 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          rialo client airdrop --amount 1
-          rialo client airdrop --amount 1
+          for _ in 1 2 3 4 5; do
+            rialo client airdrop --amount 1
+          done
 
       - name: Inspect supported Venus deploy command
         shell: bash
