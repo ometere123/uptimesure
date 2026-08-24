@@ -1,17 +1,16 @@
-name: rialo-devnet-proof
+name: rialo-experimental-devnet-proof
 
+# EXPERIMENTAL — NOT A RELEASE GATE.
+#
+# The Rialo prototype under program/ is retained as a future migration path for
+# the monitoring/scheduling layer. Its asynchronous Workflow/REX callback runtime
+# has NOT been proven end to end (see docs/RIALO_MIGRATION.md for exactly what is
+# and is not proven). This workflow therefore runs on manual dispatch only, so an
+# unresolved upstream limitation in an experimental adapter can never report the
+# supported Base Sepolia product as failing on the default branch.
+#
+# The canonical gate for the shipped product is .github/workflows/product-verify.yml.
 on:
-  push:
-    branches: [main]
-    paths:
-      - "program/**"
-      - "scripts/devnet-smoke.sh"
-      - ".github/workflows/devnet-proof.yml"
-  pull_request:
-    paths:
-      - "program/**"
-      - "scripts/devnet-smoke.sh"
-      - ".github/workflows/devnet-proof.yml"
   workflow_dispatch:
 
 permissions:

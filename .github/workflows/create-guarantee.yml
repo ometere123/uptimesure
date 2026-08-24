@@ -1,4 +1,7 @@
-name: create-devnet-guarantee
+name: rialo-experimental-create-devnet-guarantee
+
+# EXPERIMENTAL — Rialo DevNet only. Not part of the supported Base Sepolia
+# product. See docs/RIALO_MIGRATION.md.
 
 on:
   workflow_dispatch:

@@ -1,0 +1,139 @@
+name: product-verify
+
+# Canonical release gate for the supported product (Next.js frontend +
+# Base Sepolia Solidity settlement + Supabase Edge monitoring).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Avoid duplicated concurrent runs for the same ref.
+concurrency:
+  group: product-verify-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Unit tests
+        run: npm test
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Production build
+        run: npm run build
+
+  contracts:
+    name: contracts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      # Compile first: Hardhat generates the TypeChain bindings that the test
+      # and script type-checks depend on.
+      - name: Compile Solidity
+        run: npm run compile
+      - name: Typecheck scripts and tests
+        run: npm run typecheck
+      - name: Hardhat tests
+        run: npm test
+
+  edge-functions:
+    name: edge-functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check monitor
+        run: deno check --config supabase/functions/monitor-due/deno.json supabase/functions/monitor-due/index.ts
+      - name: Type-check chain sync
+        run: deno check --config supabase/functions/sync-chain/deno.json supabase/functions/sync-chain/index.ts
+      - name: Type-check shared modules
+        run: deno check --config supabase/functions/deno.json supabase/functions/_shared/*.ts
+      - name: Edge Function unit tests (SSRF guard + evidence hashing)
+        run: deno test --config supabase/functions/deno.json supabase/functions/_shared
+
+  sql:
+    name: database-schema
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create the Supabase-managed roles the grants target
+        # The plain postgres image has no anon/authenticated/service_role, so every
+        # revoke/grant in the migrations - and the privilege assertions that check
+        # them - would fail before reaching the schema itself. Created NOLOGIN: the
+        # job only needs them to exist as grantees, never to connect.
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'anon') then
+              create role anon nologin noinherit;
+            end if;
+            if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+              create role authenticated nologin noinherit;
+            end if;
+            if not exists (select 1 from pg_roles where rolname = 'service_role') then
+              create role service_role nologin noinherit bypassrls;
+            end if;
+          end
+          $$;
+          SQL
+      - name: Apply migrations twice to prove idempotency
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          # pg_cron/pg_net/supabase_vault are Supabase-managed extensions and are
+          # not present in the plain postgres image, so the schema migrations are
+          # applied against a shim that records the CREATE EXTENSION intent.
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 -c "create schema if not exists vault;"
+          for pass in 1 2; do
+            echo "== migration pass $pass =="
+            for file in supabase/migrations/*.sql; do
+              echo "-- $file"
+              sed -E 's/^create extension if not exists (pg_cron|pg_net|supabase_vault).*$/-- managed extension (skipped in CI)/' "$file" \
+                | psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f -
+            done
+          done
+      - name: Assert schema invariants
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f supabase/tests/schema_assertions.sql

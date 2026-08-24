@@ -1,78 +1,186 @@
 # UptimeSure
 
-**Executable service guarantees on Rialo.**
+> **Put money behind your uptime promise.**
 
-UptimeSure turns an API uptime promise into a running workflow. A provider defines a public HTTPS endpoint, a repeated-failure threshold, a beneficiary, and a capped compensation amount. Rialo schedules checks; REX/TEE nodes perform the real HTTP observations; the Venus program confirms incidents; and a confirmed breach can transfer provider-funded DevNet RLO automatically.
+UptimeSure is an executable service-guarantee product for APIs, RPCs, webhooks and online infrastructure. A provider fully funds its maximum promised liability in Circle test USDC on Base Sepolia. Supabase Cron checks the real HTTPS service through Edge Functions. Deterministic breach state is committed onchain. When the configured failure threshold and minimum outage duration are satisfied, the contract compensates the fixed beneficiary automatically.
 
-No custom backend, database, keeper, cron service, or oracle is required.
+There is no AI in the payout path and no mock monitoring data.
 
-## What is implemented
+## Current status
 
-- Rialo Venus workflow with persistent SLA state and owner controls.
-- Native recurring `AFTER` scheduling with drift/backlog protection.
-- REX WASM component that performs real HTTPS GET probes inside the TEE execution surface.
-- Strict-majority/fail-closed reduction of REX report outputs.
-- Consecutive-failure breach policy, recovery tracking, duplicate-payout prevention and payout caps.
-- Native Rialo DevNet RLO compensation using the same system-transfer pattern demonstrated by Rialo's public REX pipeline example.
-- Payout failure isolation: an empty provider payer records a failed settlement without killing monitoring.
-- HTTPS/private-host input guardrails and bounded policy inputs.
-- React/Vite product UI with Rialo Frost wallet connection, live DevNet block height/balance and deployment-proof gating.
-- Ubuntu GitHub Actions for the Rialo Linux toolchain, so editing can remain native Windows/VS Code without WSL.
-- Separate verification, real DevNet deployment-proof and manual real guarantee-launch workflows.
+**The contract is not deployed.** `deployments/base-sepolia.json` ships as `awaiting-deployment` with every address and transaction field `null`, and it stays that way until a real transaction succeeds. There is no live frontend URL, no Supabase project, no indexed guarantee and no end-to-end payout proof in this repository yet, because deployment requires a funded Base Sepolia deployer key and a Supabase access token that are not available to the build.
 
-## Architecture
+What *is* verified is the code: the frontend, the settlement contract, the monitoring functions and the database schema all pass the canonical `product-verify` gate. Treat this README as describing a code-complete product awaiting deployment, not a running service. `docs/DEMO.md` is the procedure for producing the missing testnet evidence and the definition of what would count as proof.
+
+## Product stack
+
+| Layer | Technology |
+| --- | --- |
+| Frontend | Next.js 16 + React 19 on Vercel |
+| Settlement | Solidity 0.8.28 on Base Sepolia (chainId 84532) |
+| Coverage asset | Circle Base Sepolia test USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7c`, 6 decimals) |
+| Database / public read model | Supabase Postgres |
+| Scheduler | Supabase Cron / pg_cron |
+| Monitoring | Supabase Edge Functions (Deno) |
+| Chain reads/writes | viem |
+| Future adapter | Rialo Venus + REX prototype retained in repo |
+
+The V1 architecture deliberately starts on free-account-friendly infrastructure. Testnet USDC has no financial value.
+
+## Core flow
 
 ```text
-Static Vercel UI
-      |
-      v
-Rialo DevNet Venus workflow
-      |
-      +---- timer ----> REX / TEE ---- HTTPS ----> service endpoint
-      |                    |
-      |<---- report -------+
-      |
-      +---- repeated-failure policy
-      |
-      +---- confirmed breach ----> capped native RLO transfer ----> beneficiary
+Provider creates public SLA terms
+  -> approves and fully escrows test USDC
+  -> Supabase sync indexes the onchain guarantee
+  -> Cron claims the guarantee when due (atomic lease, not a bare timestamp query)
+  -> monitor-due performs a real bounded HTTPS probe
+  -> probe evidence is hashed and stored in Postgres
+  -> steady-state healthy checks stay offchain to avoid unnecessary gas
+  -> failures are submitted by the restricted MONITOR_ROLE
+  -> the first healthy check after a failure is submitted to reset/recover state
+  -> contract applies freshness + spacing + consecutive-failure + outage rules
+  -> confirmed breach creates an incident and pays the fixed beneficiary
 ```
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), [`docs/SECURITY.md`](docs/SECURITY.md), and [`docs/DEMO.md`](docs/DEMO.md).
+This keeps the financial state deterministic without spending a Base Sepolia transaction for every successful one-minute health check.
 
-## Windows-first development
+## Contract guarantees
 
-The frontend and source editing work normally in VS Code on Windows. The repository's GitHub Actions Ubuntu runner installs `rialoman`, pins the Rialo `0.10.1` toolchain, builds the PolkaVM artifact/REX component, and deploys to Rialo DevNet. No WSL or macOS is required for that path.
+`contracts/contracts/UptimeSureCore.sol` enforces the financial and lifecycle rules. The monitoring signer cannot choose recipients or payout amounts.
 
-Frontend locally:
+A new guarantee specifies: beneficiary, HTTPS endpoint, expected HTTP status, optional expected body fragment, maximum latency, check interval, consecutive-failure threshold, minimum outage duration, payout per confirmed incident, maximum payout count, expiry, and fully funded coverage.
 
-```powershell
-cd web
+Enforced bounds:
+
+```text
+MIN_CHECK_INTERVAL     60 seconds
+MAX_CHECK_INTERVAL     86_400 seconds
+MAX_LATENCY_MS         30_000
+MAX_TERM               366 days
+MAX_OBSERVATION_AGE    10 minutes
+FUTURE_TOLERANCE       30 seconds
+SETTLEMENT_WINDOW      30 minutes
+```
+
+The contract rejects an underfunded promise: coverage must be at least `payoutPerIncident * maxPayouts` at creation. Observation IDs cannot be replayed (the guard is namespaced per guarantee), observations must be fresh and correctly spaced, and one unresolved incident cannot pay twice.
+
+`SETTLEMENT_WINDOW` is why a provider cannot reclaim coverage the moment a guarantee expires. An outage that began inside the covered term may still be settling, so `withdrawExpired` requires `block.timestamp > expiresAt + SETTLEMENT_WINDOW`.
+
+## Supabase
+
+`supabase/` contains the Postgres schema, indexes and RLS; the public guarantee/observation/incident read models; Cron setup using pg_cron + pg_net + Vault; the `monitor-due` Edge Function for real HTTPS probes and bounded chain submissions; and the `sync-chain` Edge Function for event indexing.
+
+Supabase is not the source of truth for funds. Deleting or modifying an indexed row cannot move coverage. Base Sepolia contract state remains authoritative for beneficiary, liability, incident and payout rules.
+
+The monitor runs once per minute and processes at most 10 due guarantees per invocation, 5 concurrently. Guarantees are claimed through an atomic lease (`claim_due_guarantees` / `complete_monitor_run`) rather than a bare `next_check_at <= now()` select, so two overlapping invocations cannot both submit an observation for the same scheduled slot, and a crashed run is reclaimed after its lease expires instead of stalling.
+
+Normal healthy observations are evidence-only; chain writes are reserved for failures and recovery resets.
+
+## Frontend
+
+The root Next.js app provides the product landing page, the public guarantee registry, a provider/beneficiary wallet dashboard, the real onchain guarantee creation flow with test-USDC approval, the guarantee detail/proof page with monitoring observations and evidence hashes, incident and compensation history, provider controls for topping up and reclaiming coverage, a live public system-status page, and BaseScan links.
+
+The detail page reads the contract and the index independently. If they disagree it renders the divergence and marks the contract authoritative, rather than presenting a lagging indexer as a change in financial state. When Supabase or the contract address is not configured, the UI names the missing dependency instead of rendering fake success data.
+
+## Local setup
+
+```bash
+cp .env.example .env.local
 npm install
 npm run dev
 ```
 
-The stock-Rust program type check can run anywhere the published crates support:
+Frontend variables — these five, and only these five, reach the browser:
 
-```bash
-cargo check --manifest-path program/Cargo.toml
+```text
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
+NEXT_PUBLIC_UPTIMESURE_CONTRACT=
+NEXT_PUBLIC_USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7c
 ```
 
-The deployable artifact is built in CI with:
+## Contracts
 
 ```bash
-cargo build --manifest-path program/artifact/Cargo.toml
+cd contracts
+cp .env.example .env
+npm install
+npm run compile
+npm test
+npm run deploy:base-sepolia
 ```
 
-## Real DevNet proof
+A Base Sepolia deployment requires:
 
-`.github/workflows/devnet-proof.yml` deliberately starts with a fresh DevNet-only key, faucet funds it, builds the actual deployable program, calls `rialo client program deploy-venus`, and uploads the deployment log plus generated Venus interface files. `deployment/devnet.json` and `web/public/deployment.json` stay null until a successful deployment gives us evidence worth publishing.
+```text
+BASE_SEPOLIA_RPC_URL
+DEPLOYER_PRIVATE_KEY
+MONITOR_ADDRESS
+USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7c
+```
 
-To create a real workflow after deployment, use the GitHub **create-devnet-guarantee** action or the generated CLI launch packet in the frontend. The repository does not substitute mocked agreement state for a network transaction.
+Use a testnet-only deployer. `MONITOR_ADDRESS` is mandatory and must be a different low-value wallet: the constructor reverts if the monitor equals the deployer, and the script refuses to run otherwise. The constructor grants `DEFAULT_ADMIN_ROLE` to the deployer and `MONITOR_ROLE` to the monitor address only — the deployer never holds `MONITOR_ROLE`, so no grant or renounce transaction is involved. After deploying, the script asserts onchain that the monitor holds the role and the deployer does not, and fails the deployment if either check does not hold.
 
-## Settlement caveat
+The monitor wallet should hold only faucet ETH for testnet gas and must never custody guarantee USDC.
 
-The current settlement rail is native **DevNet RLO from the workflow payer**. This is a provider-funded automatic guarantee demo; it is **not** a stablecoin escrow, insurance product, or production custody system. A future production escrow adapter should be separately designed and audited rather than represented here as if it already exists.
+A successful deployment writes real evidence to `deployments/base-sepolia.json`: contract address, deployment transaction, block, deployer, monitor address, monitor role hash, source commit and timestamp. `npm run verify:deployment` then re-reads the live contract over RPC and treats that file only as a pointer, checking that the coverage token is Circle test USDC, that the roles are held by the expected addresses and that the deployed bytecode and interface respond.
 
-## License
+## Supabase deployment
 
-MIT
+See `supabase/README.md`. Configure these Function secrets after contract deployment:
+
+```text
+CRON_SECRET
+BASE_SEPOLIA_RPC_URL
+UPTIMESURE_CONTRACT_ADDRESS
+UPTIMESURE_DEPLOY_BLOCK
+MONITOR_PRIVATE_KEY
+```
+
+`MONITOR_PRIVATE_KEY` must correspond to the granted `MONITOR_ADDRESS`. `CRON_SECRET` must be at least 24 characters — the functions refuse to run with a shorter one rather than accept a brute-forceable credential on a public endpoint. Then apply `supabase/cron.sql` with the project URL, publishable key and matching cron secret stored in Vault.
+
+## Verification
+
+GitHub Actions `product-verify` is the canonical release gate for every PR and push to `main`:
+
+```text
+web:              npm ci -> tests -> typecheck -> production build
+contracts:        npm ci -> compile -> typecheck -> Hardhat tests
+edge-functions:   deno check (monitor, sync, shared) -> deno test
+database-schema:  migrations applied twice for idempotency -> schema assertions
+```
+
+The same matrix runs locally:
+
+```bash
+bash scripts/verify-all.sh
+```
+
+The `database-schema` job needs a real Postgres, so it runs in CI rather than locally. It creates the Supabase-managed `anon`/`authenticated`/`service_role` roles, shims the Supabase-only extensions, applies every migration **twice** to prove idempotency, then asserts the schema invariants.
+
+The Rialo workflows are retained as `workflow_dispatch`-only experimental workflows and do not gate V1.
+
+## Dependency posture
+
+The frontend and Edge Functions report zero known vulnerabilities. `contracts/` still reports advisories inside the Hardhat 2 developer toolchain; they are documented rather than silenced, because that package produces no runtime artifact and clearing them requires a semver-major Hardhat 3 migration that would risk the test suite proving the settlement contract safe. See `docs/SECURITY.md` for the full position and the two scoped overrides that were applied.
+
+## Rialo migration
+
+The earlier Rialo-native prototype remains in `program/` and `web/`. It reached real DevNet Venus-program and REX-component deployment, and root transactions were accepted — but reliable asynchronous child callback lineage was **never proven**, so no claim of a working Rialo runtime integration is made here. UptimeSure V1 therefore uses infrastructure available today while keeping a direct migration path:
+
+```text
+Supabase Cron        -> Rialo Workflow
+Supabase Edge probe  -> Rialo REX / external-data execution
+Base contract        -> Venus state or retained EVM settlement
+Vercel product UI    -> same product surface
+```
+
+See `docs/RIALO_MIGRATION.md`.
+
+## Security
+
+Read `docs/SECURITY.md` before deploying. It records the accepted trust assumptions — a single monitor that can withhold observations, and a residual DNS-rebinding window that cannot be closed with the portable Fetch API — rather than implying they are solved.
+
+This is an unaudited testnet release, not a mainnet financial or insurance product.
