@@ -26,7 +26,7 @@ create table if not exists public.monitor_runs (
   completed_at timestamptz,
   attempts integer not null default 1 check (attempts > 0),
   last_error text,
-  primary key (guarantee_id, scheduled_for)
+  constraint monitor_runs_pkey primary key (guarantee_id, scheduled_for)
 );
 
 comment on table public.monitor_runs is
@@ -75,6 +75,12 @@ language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
+-- Every RETURNS TABLE column above is also an in-scope PL/pgSQL variable, so a bare `guarantee_id` inside the
+-- query body is ambiguous and Postgres refuses to guess. The conflict is resolved two ways, because each
+-- covers a case the other cannot: this pragma makes an ambiguous *reference* resolve to the column, and the
+-- ON CONFLICT clause below names the constraint instead of re-listing columns, because the inference-list
+-- position is not a value expression and the pragma does not reach it.
+#variable_conflict use_column
 declare
   v_limit integer := least(greatest(coalesce(p_limit, 10), 1), 50);
   v_lease integer := least(greatest(coalesce(p_lease_seconds, 120), 30), 900);
@@ -96,7 +102,7 @@ begin
     insert into public.monitor_runs as mr (guarantee_id, scheduled_for, claim_token, lease_expires_at)
     select d.id, d.next_check_at, gen_random_uuid(), now() + make_interval(secs => v_lease)
     from due d
-    on conflict (guarantee_id, scheduled_for) do update
+    on conflict on constraint monitor_runs_pkey do update
       set claim_token = gen_random_uuid(),
           claimed_at = now(),
           lease_expires_at = now() + make_interval(secs => v_lease),

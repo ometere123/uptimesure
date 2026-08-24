@@ -555,7 +555,13 @@ declare
 begin
   delete from public.monitor_runs where guarantee_id = 900001;
 
-  update public.guarantees set next_check_at = now() - interval '1 minute', expires_at = now() - interval '1 day'
+  -- Backdate creation as well as expiry. `guarantees_policy_bounds` enforces `expires_at > created_at`, so
+  -- moving expiry into the past alone would construct a row the schema legitimately forbids and the failure
+  -- would be the test's, not the scheduler's. A real expired guarantee was created before it expired.
+  update public.guarantees
+     set next_check_at = now() - interval '1 minute',
+         created_at = now() - interval '31 days',
+         expires_at = now() - interval '1 day'
    where id = 900001;
   select count(*) into claimed from public.claim_due_guarantees(10, 120) where guarantee_id = 900001;
   if claimed <> 0 then
