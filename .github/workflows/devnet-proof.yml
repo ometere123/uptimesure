@@ -120,6 +120,17 @@ jobs:
           done
           exit "$status"
 
+      - name: Capture structured deployment result
+        if: success()
+        working-directory: program
+        shell: bash
+        run: |
+          set -euo pipefail
+          rialo client program deploy-venus . \
+            --keypair "$HOME/.config/rialo/uptimesure-ci.keypair" \
+            --rex-keypair "$HOME/.config/rialo/uptimesure-rex-ci.keypair" \
+            --json 2>&1 | tee ../proof/deploy-json.log
+
       - name: Create real healthy guarantee and run an HTTP check
         if: success()
         working-directory: program
@@ -179,6 +190,9 @@ jobs:
             done
             test "$status" -eq 0
           done
+          sleep 90
+          rialo client get-workflow-lineage "$CHECK_SIGNATURE" --full-id true 2>&1 | tee ../proof/run-check-lineage-after-wait.log
+          grep -Eq 'Total nodes: ([2-9]|[1-9][0-9]+)' ../proof/run-check-lineage-after-wait.log
           {
             echo "program_id=$PROGRAM_ID"
             echo "rex_bytecode_account=$REX_ACCOUNT"
