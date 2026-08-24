@@ -32,7 +32,9 @@ select cron.schedule(
       'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'publishable_key'),
       'x-uptimesure-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'uptimesure_cron_secret')
     ),
-    body := '{"limit": 20}'::jsonb
+    -- Ten guarantees keeps worst-case probe + receipt waiting inside the free
+    -- Edge Function wall-clock budget. Backlog is drained on following ticks.
+    body := '{"limit": 10}'::jsonb
   );
   $$
 );
