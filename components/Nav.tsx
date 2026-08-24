@@ -28,6 +28,7 @@ export function Nav() {
         <nav className="nav-links">
           <Link href="/guarantees">Guarantees</Link>
           <Link href="/dashboard">Dashboard</Link>
+          <Link href="/status">Status</Link>
           <Link href="/create">Create</Link>
         </nav>
         <button className="button button-small button-ghost" onClick={connect} disabled={busy}>
