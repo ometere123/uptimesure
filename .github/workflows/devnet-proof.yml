@@ -43,7 +43,9 @@ jobs:
           rialoman install stable@0.10.1
           rialoman use stable@0.10.1
           rialoman current
-          rialoman which rialo
+          RIALO_BIN="$(dirname "$(rialoman which rialo)")"
+          echo "$RIALO_BIN" >> "$GITHUB_PATH"
+          export PATH="$RIALO_BIN:$PATH"
           rialo --version
 
       - name: Stock-Rust type check
