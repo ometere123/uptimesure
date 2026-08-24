@@ -96,11 +96,24 @@ jobs:
         working-directory: program
         shell: bash
         run: |
-          set -euxo pipefail
-          rialo client program deploy-venus . \
-            --keypair "$HOME/.config/rialo/uptimesure-ci.keypair" \
-            --rex-keypair "$HOME/.config/rialo/uptimesure-rex-ci.keypair" \
-            2>&1 | tee ../devnet-deploy.log
+          set -uo pipefail
+          status=1
+          for attempt in 1 2 3; do
+            echo "deployment_attempt=$attempt" | tee -a ../devnet-deploy.log
+            rialo client program deploy-venus . \
+              --keypair "$HOME/.config/rialo/uptimesure-ci.keypair" \
+              --rex-keypair "$HOME/.config/rialo/uptimesure-rex-ci.keypair" \
+              2>&1 | tee -a ../devnet-deploy.log
+            status=${PIPESTATUS[0]}
+            if [ "$status" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Rialo deployment attempt $attempt failed; retrying the same deterministic IDs in 15s" | tee -a ../devnet-deploy.log
+              sleep 15
+            fi
+          done
+          exit "$status"
 
       - name: Collect proof artifacts
         if: always()
