@@ -1,36 +1,22 @@
-name: verify
+name: rialo-experimental-verify
 
+# The Rialo prototype is retained for future migration work, but it is no
+# longer a release gate for the Base Sepolia/Supabase product. Run this
+# manually when working on the experimental adapter.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  program:
+  prototype-note:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Type-check Rialo Venus program
-        run: cargo check --manifest-path program/Cargo.toml
-
-  web:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install frontend dependencies
-        working-directory: web
-        run: npm install --no-audit --no-fund
-      - name: Test
-        working-directory: web
-        run: npm test -- --run
-      - name: Build
-        working-directory: web
-        run: npm run build
+      - name: Preserve prototype without gating V1
+        run: |
+          test -f program/Cargo.toml
+          test -f web/package.json
+          echo "Rialo prototype retained under program/ and web/."
+          echo "See docs/RIALO_MIGRATION.md for the proven and unresolved runtime evidence."
