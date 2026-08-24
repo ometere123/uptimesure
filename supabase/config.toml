@@ -1,0 +1,7 @@
+project_id = "uptimesure"
+
+[functions.monitor-due]
+verify_jwt = false
+
+[functions.sync-chain]
+verify_jwt = false
