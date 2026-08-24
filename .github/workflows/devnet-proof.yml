@@ -155,8 +155,30 @@ jobs:
           CHECK_SIGNATURE="$(grep -Eo '[1-9A-HJ-NP-Za-km-z]{80,100}' ../proof/run-check-now.log | head -n 1)"
           test -n "$TX_SIGNATURE"
           test -n "$CHECK_SIGNATURE"
-          rialo client get-workflow-lineage "$TX_SIGNATURE" --full-id true 2>&1 | tee ../proof/create-guarantee-lineage.log
-          rialo client get-workflow-lineage "$CHECK_SIGNATURE" --full-id true 2>&1 | tee ../proof/run-check-lineage.log
+          for signature_kind in create check; do
+            if [ "$signature_kind" = create ]; then
+              signature="$TX_SIGNATURE"
+              output="../proof/create-guarantee-lineage.log"
+            else
+              signature="$CHECK_SIGNATURE"
+              output="../proof/run-check-lineage.log"
+            fi
+            status=1
+            for attempt in 1 2 3 4 5; do
+              set +e
+              rialo client get-workflow-lineage "$signature" --full-id true 2>&1 | tee "$output"
+              status=${PIPESTATUS[0]}
+              set -e
+              if [ "$status" -eq 0 ]; then
+                break
+              fi
+              if [ "$attempt" -lt 5 ]; then
+                echo "lineage lookup for $signature_kind attempt $attempt did not confirm; retrying in 15s" | tee -a "$output"
+                sleep 15
+              fi
+            done
+            test "$status" -eq 0
+          done
           {
             echo "program_id=$PROGRAM_ID"
             echo "rex_bytecode_account=$REX_ACCOUNT"
