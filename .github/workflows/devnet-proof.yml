@@ -40,6 +40,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+          rustup target add wasm32-wasip2
           rialoman install stable@0.10.1
           rialoman use stable@0.10.1
           rialoman current
