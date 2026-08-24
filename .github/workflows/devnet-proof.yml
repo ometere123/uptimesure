@@ -152,12 +152,15 @@ jobs:
             --arg endpoint_url="https://example.com" \
             --arg expected_fragment="Example Domain" \
             --arg beneficiary="$DEPLOYER_PUBKEY" \
-            --arg check_interval_secs=30 \
+            --arg check_interval_secs=15 \
             --arg failure_threshold=2 \
             --arg compensation_kelvin=0 \
             --arg max_payouts=1 \
             --arg __rex_bytecode_account="$REX_ACCOUNT" \
             --json 2>&1 | tee ../proof/create-guarantee.log
+          sleep 300
+          rialo client get-workflow-lineage "$TX_SIGNATURE" --full-id true 2>&1 | tee ../proof/create-guarantee-lineage-after-schedule.log
+          grep -Eq 'Total nodes: ([2-9]|[1-9][0-9]+)' ../proof/create-guarantee-lineage-after-schedule.log
           rialo client program invoke "$PROGRAM_ID" --program-dir . \
             --function run_check_now \
             --arg workflow_pda_slug="$SLUG" \
