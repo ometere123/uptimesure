@@ -37,8 +37,9 @@ export type ObservationRow = {
   body_sha256: string | null;
   evidence_hash: string;
   error_code: string | null;
+  chain_error: string | null;
   tx_hash: string | null;
-  tx_status: "pending" | "confirmed" | "failed" | "indexed";
+  tx_status: "pending" | "confirmed" | "failed" | "indexed" | "not_required";
 };
 
 export type IncidentRow = {
