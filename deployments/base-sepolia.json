@@ -7,8 +7,8 @@
   "deploymentTransaction": null,
   "deploymentBlock": null,
   "monitorAddress": null,
-  "monitorGrantTransaction": null,
-  "deployerMonitorRenounceTransaction": null,
+  "monitorRole": null,
+  "sourceCommit": null,
   "deployedAt": null,
   "status": "awaiting-deployment"
 }

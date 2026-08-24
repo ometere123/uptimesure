@@ -78,8 +78,16 @@ alter table public.observations enable row level security;
 alter table public.incidents enable row level security;
 alter table public.chain_sync_state enable row level security;
 
+-- Public read, service-role-only write. The onchain contract is the financial source of truth; these tables are
+-- a read model, so anyone may read them and nobody holding a browser key may write them.
+-- Dropped first because `create policy` has no `if not exists` in Postgres 15.
+drop policy if exists "public read guarantees" on public.guarantees;
 create policy "public read guarantees" on public.guarantees for select using (true);
+
+drop policy if exists "public read observations" on public.observations;
 create policy "public read observations" on public.observations for select using (true);
+
+drop policy if exists "public read incidents" on public.incidents;
 create policy "public read incidents" on public.incidents for select using (true);
 
 revoke all on public.chain_sync_state from anon, authenticated;
@@ -99,10 +107,14 @@ begin
 end;
 $$;
 
+-- Triggers are dropped first so the whole migration is idempotent: `create trigger` has no `if not exists`,
+-- and CI applies every migration twice to prove re-application is safe.
+drop trigger if exists guarantees_touch_updated_at on public.guarantees;
 create trigger guarantees_touch_updated_at
 before update on public.guarantees
 for each row execute function public.touch_updated_at();
 
+drop trigger if exists incidents_touch_updated_at on public.incidents;
 create trigger incidents_touch_updated_at
 before update on public.incidents
 for each row execute function public.touch_updated_at();

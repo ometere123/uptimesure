@@ -7,5 +7,5 @@
     "resolveJsonModule": true,
     "types": ["node", "mocha"]
   },
-  "include": ["./hardhat.config.ts", "./scripts", "./test"]
+  "include": ["./hardhat.config.ts", "./scripts", "./test", "./typechain-types"]
 }

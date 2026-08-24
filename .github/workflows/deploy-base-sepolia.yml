@@ -1,7 +1,18 @@
 name: deploy-base-sepolia
 
+# Manual, testnet-only deployment of UptimeSureCore.
+#
+# Every scalar below is quoted. GitHub's workflow YAML parser resolves an
+# unquoted 0x-prefixed 40-hex-character address as an integer literal, which
+# overflows int64 and produces a repository-wide workflow startup failure on
+# every push (not just on dispatch). Keep addresses quoted.
 on:
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm a real Base Sepolia deployment'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -11,27 +22,55 @@ jobs:
     runs-on: ubuntu-latest
     environment: base-sepolia
     steps:
+      - name: Require explicit confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM" != "deploy" ]; then
+            echo "::error::Refusing to deploy without explicit confirmation." >&2
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+
       - name: Install contract dependencies
         working-directory: contracts
-        run: npm install --no-audit --no-fund
-      - name: Compile and test before deployment
+        run: npm ci --no-audit --no-fund
+
+      - name: Compile, typecheck and test before deployment
         working-directory: contracts
-        run: npm run compile && npm test
+        run: |
+          npm run compile
+          npm run typecheck
+          npm test
+
       - name: Deploy UptimeSureCore
         working-directory: contracts
         env:
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
           DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
           MONITOR_ADDRESS: ${{ secrets.MONITOR_ADDRESS }}
-          USDC_ADDRESS: 0x036CbD53842c5426634e7929541eC2318f3dCF7c
+          USDC_ADDRESS: '0x036CbD53842c5426634e7929541eC2318f3dCF7c'
         run: npm run deploy:base-sepolia
+
+      - name: Verify deployed state through the public RPC
+        working-directory: contracts
+        env:
+          BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+        run: npm run verify:deployment
+
       - name: Upload deployment evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: uptimesure-base-sepolia-deployment
           path: deployments/base-sepolia.json
-          retention-days: 30
+          if-no-files-found: warn
+          retention-days: 90

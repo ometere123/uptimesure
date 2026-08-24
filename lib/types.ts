@@ -39,8 +39,18 @@ export type ObservationRow = {
   error_code: string | null;
   chain_error: string | null;
   tx_hash: string | null;
-  tx_status: "pending" | "confirmed" | "failed" | "indexed" | "not_required";
+  /** Mirrors the observations_tx_status_check constraint. See migration 0006 for what each value means. */
+  tx_status: ObservationChainStatus;
 };
+
+export type ObservationChainStatus =
+  | "pending"
+  | "submitted"
+  | "confirmed"
+  | "failed"
+  | "indexed"
+  | "not_required"
+  | "unmonitorable";
 
 export type IncidentRow = {
   id: number;
@@ -51,4 +61,15 @@ export type IncidentRow = {
   payout_amount: string;
   confirm_evidence_hash: string;
   recovery_evidence_hash: string | null;
+};
+
+/** The `chain_sync_public` view: indexer health, readable with the publishable key. */
+export type ChainSyncRow = {
+  chain_id: number;
+  deploy_block: string;
+  contract_address: string;
+  last_synced_block: string;
+  safe_block: string;
+  last_run_at: string | null;
+  last_error: string | null;
 };

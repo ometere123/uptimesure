@@ -18,4 +18,6 @@ The previous implementation compiled the Venus program, built PolkaVM/REX artifa
 
 That limitation is why V1 does not depend on Rialo availability. The product is built now; Rialo can later collapse the scheduler and external-data infrastructure when that execution path is dependable.
 
-The original Rialo source remains under `program/` and its original prototype UI under `web/` until the product branch is fully verified. They are not used by the V1 Vercel build.
+The original Rialo source remains under `program/` and its original prototype UI under `web/`. Neither is used by the V1 Vercel build, and neither gates it: the Rialo workflows are `workflow_dispatch`-only and the `product-verify` gate does not run them. They are kept deliberately as the migration path, not as work in progress awaiting deletion.
+
+`docs/DEMO.md` records what a meaningful Rialo demo would have to show — lineage extending past the root node — alongside the V1 proof procedure.
