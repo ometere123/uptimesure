@@ -1,0 +1,9 @@
+{
+  "network": "rialo-devnet",
+  "status": "awaiting-first-deployment",
+  "programId": null,
+  "deployTransaction": null,
+  "sourceCommit": null,
+  "verifiedAt": null,
+  "note": "Published only from verified deployment evidence."
+}
