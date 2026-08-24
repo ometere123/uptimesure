@@ -23,6 +23,8 @@ type Probe = {
 
 const MAX_BODY = 65_536;
 const TIMEOUT_MS = 8_000;
+const MAX_DUE_PER_RUN = 10;
+const PARALLELISM = 5;
 
 function adminClient() {
   const url = Deno.env.get("SUPABASE_URL");
@@ -135,7 +137,7 @@ async function processGuarantee(row: GuaranteeRow) {
     [BigInt(row.id), observationId, BigInt(observedAt), result.healthy, result.status, result.latencyMs, result.bodySha256, errorHash]
   ));
 
-  await supabase.from("observations").insert({
+  const inserted = await supabase.from("observations").insert({
     observation_id: observationId,
     guarantee_id: row.id,
     observed_at: new Date(observedAt * 1000).toISOString(),
@@ -147,10 +149,35 @@ async function processGuarantee(row: GuaranteeRow) {
     error_code: result.errorCode,
     tx_status: "pending",
   });
+  if (inserted.error) throw new Error(`OBSERVATION_STORE_FAILED:${inserted.error.message}`);
 
   let txHash: `0x${string}` | null = null;
+  let chainRequired = true;
   try {
     const client = publicClient();
+    const chainGuarantee = await client.readContract({
+      address: contractAddress(),
+      abi: coreAbi,
+      functionName: "getGuarantee",
+      args: [BigInt(row.id)],
+    });
+
+    if (!chainGuarantee.active || chainGuarantee.withdrawn) {
+      chainRequired = false;
+      await supabase.from("observations").update({ tx_status: "not_required", chain_error: "GUARANTEE_INACTIVE_ONCHAIN" }).eq("observation_id", observationId);
+      await supabase.from("guarantees").update({ active: chainGuarantee.active, withdrawn: chainGuarantee.withdrawn }).eq("id", row.id);
+      return { id: row.id, healthy: result.healthy, status: result.status, latencyMs: result.latencyMs, txHash, chainRequired };
+    }
+
+    // Healthy steady-state probes remain in the evidence store and do not burn
+    // testnet gas. A healthy result is submitted onchain only when it must reset
+    // an existing failure streak/recover an incident. Every failure is onchain.
+    if (result.healthy && Number(chainGuarantee.consecutiveFailures) === 0) {
+      chainRequired = false;
+      await supabase.from("observations").update({ tx_status: "not_required" }).eq("observation_id", observationId);
+      return { id: row.id, healthy: true, status: result.status, latencyMs: result.latencyMs, txHash, chainRequired };
+    }
+
     const { wallet, account } = monitorWallet();
     const { request } = await client.simulateContract({
       address: contractAddress(),
@@ -161,15 +188,23 @@ async function processGuarantee(row: GuaranteeRow) {
     });
     txHash = await wallet.writeContract(request);
     const receipt = await client.waitForTransactionReceipt({ hash: txHash, confirmations: 1, timeout: 60_000 });
-    await supabase.from("observations").update({ tx_hash: txHash, tx_status: receipt.status === "success" ? "confirmed" : "failed" }).eq("observation_id", observationId);
+    await supabase.from("observations").update({
+      tx_hash: txHash,
+      tx_status: receipt.status === "success" ? "confirmed" : "failed",
+      chain_error: receipt.status === "success" ? null : "TRANSACTION_REVERTED",
+    }).eq("observation_id", observationId);
   } catch (error) {
-    await supabase.from("observations").update({ tx_hash: txHash, tx_status: "failed", error_code: `CHAIN_${error instanceof Error ? error.message.slice(0, 120) : "ERROR"}` }).eq("observation_id", observationId);
+    await supabase.from("observations").update({
+      tx_hash: txHash,
+      tx_status: "failed",
+      chain_error: error instanceof Error ? error.message.slice(0, 240) : "CHAIN_ERROR",
+    }).eq("observation_id", observationId);
   } finally {
     const next = new Date(Date.now() + row.check_interval_seconds * 1000).toISOString();
     await supabase.from("guarantees").update({ next_check_at: next }).eq("id", row.id);
   }
 
-  return { id: row.id, healthy: result.healthy, status: result.status, latencyMs: result.latencyMs, txHash };
+  return { id: row.id, healthy: result.healthy, status: result.status, latencyMs: result.latencyMs, txHash, chainRequired };
 }
 
 export default {
@@ -178,7 +213,7 @@ export default {
     if (!authorizedCron(req)) return json({ error: "unauthorized" }, 401);
 
     const body = await req.json().catch(() => ({})) as { limit?: number };
-    const limit = Math.max(1, Math.min(Number(body.limit || 20), 20));
+    const limit = Math.max(1, Math.min(Number(body.limit || MAX_DUE_PER_RUN), MAX_DUE_PER_RUN));
     const supabase = adminClient();
     const nowIso = new Date().toISOString();
     const { data, error } = await supabase
@@ -194,8 +229,8 @@ export default {
     if (error) return json({ error: error.message }, 500);
     const rows = (data || []) as GuaranteeRow[];
     const results = [];
-    for (let i = 0; i < rows.length; i += 5) {
-      results.push(...await Promise.all(rows.slice(i, i + 5).map(processGuarantee)));
+    for (let i = 0; i < rows.length; i += PARALLELISM) {
+      results.push(...await Promise.all(rows.slice(i, i + PARALLELISM).map(processGuarantee)));
     }
     return json({ checked: results.length, results });
   },
