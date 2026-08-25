@@ -1,8 +1,9 @@
 name: rialo-experimental-verify
 
-# The Rialo prototype is retained for future migration work, but it is no
-# longer a release gate for the Base Sepolia/Supabase product. Run this
-# manually when working on the experimental adapter.
+# The Rialo prototype is retained for future migration work, but it is not a release gate for the Base
+# Sepolia/Supabase product. This workflow is `workflow_dispatch`-only on purpose: `product-verify` is the
+# only workflow that runs on push and pull_request, so an experimental prototype can never make the
+# default branch read as broken. Run this manually when working on the experimental adapter.
 on:
   workflow_dispatch:
 
@@ -10,13 +11,62 @@ permissions:
   contents: read
 
 jobs:
-  prototype-note:
+  compile:
+    name: compile the retained Rialo prototype
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Preserve prototype without gating V1
+
+      - name: Confirm the prototype is still present
         run: |
           test -f program/Cargo.toml
+          test -f program/src/lib.rs
+          test -f program/wit/rex-component.wit
           test -f web/package.json
-          echo "Rialo prototype retained under program/ and web/."
-          echo "See docs/RIALO_MIGRATION.md for the proven and unresolved runtime evidence."
+
+      # Pinned rather than `stable`: this compiles a prototype held at rialo-* 0.10.1, and a future stable
+      # release that stops accepting those crates should be visible as a toolchain decision, not as a
+      # mystery failure on an unrelated day.
+      - uses: dtolnay/rust-toolchain@1.90.0
+
+      # No Cargo.lock is committed for the prototype, so resolution is not reproducible across runs. Cache
+      # the registry only; do not cache a resolved graph, which would hide a resolution failure.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          key: rialo-cargo-registry-${{ hashFiles('program/Cargo.toml') }}
+
+      # The real check. The previous version of this workflow only asserted that files existed, which meant
+      # the prototype's compile status was never actually verified by anything. `cargo check` resolves the
+      # rialo-* dependency graph from crates.io and type-checks all 492 lines of the Venus program including
+      # the `rialo` proc-macro expansion.
+      #
+      # Not `--locked`: no Cargo.lock is committed for the prototype, so that flag could never succeed.
+      # Not piped into `tail` either -- without `set -o pipefail` a pipe returns tail's exit status, so a
+      # compile failure would report as success. That is the exact shape of a fake-green check.
+      #
+      # This step is deliberately NOT `continue-on-error`. If the prototype stops compiling, this workflow
+      # goes red and says so. Reporting a false green for retained experimental code would be worse than
+      # having no check at all, because the migration doc's claims are read as verified.
+      - name: cargo check
+        working-directory: program
+        run: cargo check --all-targets --verbose
+
+      # Informational only -- `|| true` here is deliberate and does not mask a gate. The `cargo check` step
+      # above is the pass/fail check; this step exists to record which rialo-* versions actually resolved.
+      - name: Record the resolved dependency graph
+        working-directory: program
+        run: |
+          cargo tree --depth 1 || true
+          echo "--- resolved rialo-* versions ---"
+          cargo tree --depth 0 --package 'rialo-*' 2>/dev/null || grep -n 'rialo-' Cargo.toml
+
+      - name: State what this does and does not prove
+        run: |
+          echo "PROVEN by this run: the retained Venus program compiles against rialo-* 0.10.1 from crates.io."
+          echo "NOT proven by this run: any Rialo runtime behaviour."
+          echo "In particular, reliable asynchronous child workflow/REX callback lineage was never"
+          echo "demonstrated on DevNet -- lineage remained at one node during the validation window."
+          echo "A compiling prototype is not a working async runtime integration. See docs/RIALO_MIGRATION.md."
