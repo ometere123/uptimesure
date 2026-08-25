@@ -36,6 +36,11 @@ step "edge: check sync-chain"  deno check --config supabase/functions/sync-chain
 step "edge: check shared"      deno check --config supabase/functions/deno.json supabase/functions/_shared/auth.ts supabase/functions/_shared/chain.ts supabase/functions/_shared/evidence.ts supabase/functions/_shared/ssrf.ts
 step "edge: tests"             deno test --config supabase/functions/deno.json supabase/functions/_shared
 
+# Mirrors the `committed-secrets` CI job. Unlike the schema step this needs no server, so it is never
+# skipped -- but it does need full history, and the script itself exits non-zero on a shallow clone
+# rather than reporting a clean scan it did not perform.
+step "secrets: history scan" python scripts/scan-history-secrets.py
+
 # Mirrors the `database-schema` CI job. Skipped rather than failed when no local Postgres is installed, because
 # an absent server is a missing tool and not a defect in the schema — but CI always runs it, so a schema fault
 # cannot escape by being skipped here.

@@ -76,6 +76,20 @@ jobs:
       - name: Edge Function unit tests (SSRF guard + evidence hashing)
         run: deno test --config supabase/functions/deno.json supabase/functions/_shared
 
+  secrets:
+    name: committed-secrets
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is load-bearing, not a precaution. The default shallow checkout would leave
+      # the scan reading one commit's blobs, finding nothing, and passing -- a green check that
+      # verified essentially nothing. The script refuses to run on a shallow clone for that reason,
+      # so removing this line fails the job loudly instead of silently weakening it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan every blob in history for committed secrets
+        run: python3 scripts/scan-history-secrets.py
+
   sql:
     name: database-schema
     runs-on: ubuntu-latest

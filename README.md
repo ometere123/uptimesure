@@ -151,6 +151,7 @@ GitHub Actions `product-verify` is the canonical release gate for every PR and p
 web:              npm ci -> tests -> typecheck -> production build
 contracts:        npm ci -> compile -> typecheck -> Hardhat tests
 edge-functions:   deno check (monitor, sync, shared) -> deno test
+committed-secrets: full-history blob scan for keys, mnemonics and provider tokens
 database-schema:  migrations applied twice for idempotency -> schema assertions
 ```
 
@@ -161,6 +162,8 @@ bash scripts/verify-all.sh
 ```
 
 The `database-schema` job creates the Supabase-managed `anon`/`authenticated`/`service_role` roles, shims the Supabase-only extensions, applies every migration **twice** to prove idempotency, then asserts the schema invariants. `scripts/verify-all.sh` mirrors it against a local Postgres via `scripts/verify-schema.sh`, and skips that one step — reporting the skip — when no local server is installed. CI pins `postgres:15` and is authoritative.
+
+The `committed-secrets` job runs `scripts/scan-history-secrets.py` over every blob in the repository's history, including blobs no ref points to, and exits non-zero on any match. It checks out with `fetch-depth: 0` because the default shallow checkout would scan one commit and pass; the script refuses to run on a shallow clone rather than report a clean result it did not earn. See `docs/SECURITY.md` for how that guarantee was tested.
 
 The Rialo workflows are retained as `workflow_dispatch`-only experimental workflows and do not gate V1.
 

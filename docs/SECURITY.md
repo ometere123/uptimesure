@@ -72,7 +72,15 @@ Postgres is a read model. Deleting or editing an indexed row cannot move coverag
 
 Every blob in the repository's history was scanned for 64-hex private keys, mnemonic phrases, Supabase secret formats (`eyJ`, `sbp_`) and common provider key prefixes (`sk-`, `ghp_`, `AKIA`, `AIza`, `xox`). No matching blob is present in any commit.
 
-The scan enumerated objects with `git rev-list --objects --all`, so it covers unreachable-from-`main` blobs as well, and it was checked for completeness rather than assumed: **199 of 199** blobs across **54** commits were read, with zero skipped for size. Re-run it after any commit that touches deployment or monitoring configuration — the claim above is only as current as the last commit it was run against.
+That claim is reproducible rather than asserted — `scripts/scan-history-secrets.py` is the scan, and it exits non-zero on any hit:
+
+```bash
+python scripts/scan-history-secrets.py
+```
+
+At the time of writing it reports 204 of 204 blobs across 57 commits read, 0 skipped, 0 matches. Those counts drift with every commit — including the one that records them — so treat the script's output as authoritative and the numbers here as a sample.
+
+Two design points matter more than the pattern list. The scan enumerates objects with `git cat-file --batch-all-objects`, so it covers blobs that no ref points to, which is the case it exists to catch: a secret committed once and later deleted stays in the object store and a working-tree grep will not see it. And it reports blobs skipped for size instead of passing over them, because a scan that quietly ignores part of its input reads as a clean result it did not earn. Both properties were verified by planting a private key in an unreferenced blob: the scan found it and exited 1, and reported clean again once the object was removed.
 
 ## Dependency posture
 
