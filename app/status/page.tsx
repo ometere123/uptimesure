@@ -253,7 +253,7 @@ export default function StatusPage() {
             </div>
           </dl>
           <p className="card-note">
-            Circle&apos;s Base Sepolia test USDC is <code>0x036CbD53842c5426634e7929541eC2318f3dCF7c</code>. Both
+            Circle&apos;s Base Sepolia test USDC is <code>0x036CbD53842c5426634e7929541eC2318f3dCF7e</code>. Both
             token rows above should show it; a mismatch means this build is pointed at the wrong deployment.
           </p>
         </article>

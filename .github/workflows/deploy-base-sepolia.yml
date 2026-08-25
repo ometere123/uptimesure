@@ -57,7 +57,7 @@ jobs:
           BASE_SEPOLIA_RPC_URL: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
           DEPLOYER_PRIVATE_KEY: ${{ secrets.DEPLOYER_PRIVATE_KEY }}
           MONITOR_ADDRESS: ${{ secrets.MONITOR_ADDRESS }}
-          USDC_ADDRESS: '0x036CbD53842c5426634e7929541eC2318f3dCF7c'
+          USDC_ADDRESS: '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
         run: npm run deploy:base-sepolia
 
       - name: Verify deployed state through the public RPC

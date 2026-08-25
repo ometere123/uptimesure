@@ -8,7 +8,9 @@ There is no AI in the payout path and no mock monitoring data.
 
 ## Current status
 
-**The contract is not deployed.** `deployments/base-sepolia.json` ships as `awaiting-deployment` with every address and transaction field `null`, and it stays that way until a real transaction succeeds. There is no live frontend URL, no Supabase project, no indexed guarantee and no end-to-end payout proof in this repository yet, because deployment requires a funded Base Sepolia deployer key and a Supabase access token that are not available to the build.
+**The contract is not deployed.** `deployments/base-sepolia.json` ships as `awaiting-deployment` with every address and transaction field `null`, and it stays that way until a real transaction succeeds. There is no Supabase project, no indexed guarantee and no end-to-end payout proof in this repository yet, because deployment requires a funded Base Sepolia deployer key and a Supabase access token that are not available to the build.
+
+The frontend *is* live, at **https://uptimesure.vercel.app** — but it is live in the only honest sense available without a deployment: every page reports the missing contract and missing read model as missing. `/status` shows the settlement contract as `Awaiting deployment`, `/guarantees` and `/dashboard` render empty states labelled `NO PLACEHOLDER DATA`, and `/create` refuses to build a transaction. The one live dependency it does exercise is the Base Sepolia RPC, which the status page reads on load and reports as `Healthy` from a real `eth_chainId` call. Nothing on that site is seeded, mocked or hard-coded green.
 
 What *is* verified is the code: the frontend, the settlement contract, the monitoring functions and the database schema all pass the canonical `product-verify` gate. Treat this README as describing a code-complete product awaiting deployment, not a running service. `docs/DEMO.md` is the procedure for producing the missing testnet evidence and the definition of what would count as proof.
 
@@ -18,7 +20,7 @@ What *is* verified is the code: the frontend, the settlement contract, the monit
 | --- | --- |
 | Frontend | Next.js 16 + React 19 on Vercel |
 | Settlement | Solidity 0.8.28 on Base Sepolia (chainId 84532) |
-| Coverage asset | Circle Base Sepolia test USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7c`, 6 decimals) |
+| Coverage asset | Circle Base Sepolia test USDC (`0x036CbD53842c5426634e7929541eC2318f3dCF7e`, 6 decimals) |
 | Database / public read model | Supabase Postgres |
 | Scheduler | Supabase Cron / pg_cron |
 | Monitoring | Supabase Edge Functions (Deno) |
@@ -98,7 +100,7 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
 NEXT_PUBLIC_UPTIMESURE_CONTRACT=
-NEXT_PUBLIC_USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7c
+NEXT_PUBLIC_USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 ```
 
 ## Contracts
@@ -118,7 +120,7 @@ A Base Sepolia deployment requires:
 BASE_SEPOLIA_RPC_URL
 DEPLOYER_PRIVATE_KEY
 MONITOR_ADDRESS
-USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7c
+USDC_ADDRESS=0x036CbD53842c5426634e7929541eC2318f3dCF7e
 ```
 
 Use a testnet-only deployer. `MONITOR_ADDRESS` is mandatory and must be a different low-value wallet: the constructor reverts if the monitor equals the deployer, and the script refuses to run otherwise. The constructor grants `DEFAULT_ADMIN_ROLE` to the deployer and `MONITOR_ROLE` to the monitor address only — the deployer never holds `MONITOR_ROLE`, so no grant or renounce transaction is involved. After deploying, the script asserts onchain that the monitor holds the role and the deployer does not, and fails the deployment if either check does not hold.
@@ -158,9 +160,15 @@ The same matrix runs locally:
 bash scripts/verify-all.sh
 ```
 
-The `database-schema` job needs a real Postgres, so it runs in CI rather than locally. It creates the Supabase-managed `anon`/`authenticated`/`service_role` roles, shims the Supabase-only extensions, applies every migration **twice** to prove idempotency, then asserts the schema invariants.
+The `database-schema` job creates the Supabase-managed `anon`/`authenticated`/`service_role` roles, shims the Supabase-only extensions, applies every migration **twice** to prove idempotency, then asserts the schema invariants. `scripts/verify-all.sh` mirrors it against a local Postgres via `scripts/verify-schema.sh`, and skips that one step — reporting the skip — when no local server is installed. CI pins `postgres:15` and is authoritative.
 
 The Rialo workflows are retained as `workflow_dispatch`-only experimental workflows and do not gate V1.
+
+### Guarded constants
+
+The Base Sepolia coverage-token address is asserted in both suites, in `lib/config.test.ts` and `contracts/test/deployment-constants.test.ts`. This is a regression guard, not a formality: the address shipped for several commits as `…8f3dCF7c` instead of Circle's published `…8f3dCF7e`. One wrong nibble is an address with **no contract** on Base Sepolia, so every `approve`/`transferFrom` against it would have reverted. It survived review because a 40-character hex string reads as correct at a glance, and it was never exercised — nothing had yet been deployed to a real chain.
+
+Two checks now catch that class of mistake without needing to know the right answer or reach the network: EIP-55 encodes a keccak checksum in the letter casing, so any altered nibble makes the address fail strict validation; and the committed `deployments/base-sepolia.json` is asserted to carry real evidence for every field whenever its `status` is `deployed`, which makes fabricated deployment evidence a failing test rather than a plausible-looking file.
 
 ## Dependency posture
 

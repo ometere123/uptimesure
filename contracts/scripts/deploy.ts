@@ -2,7 +2,7 @@ import { ethers, network } from "hardhat";
 import fs from "node:fs";
 import path from "node:path";
 
-const BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7c";
+const BASE_SEPOLIA_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
 const BASE_SEPOLIA_CHAIN_ID = 84532n;
 
 async function main() {

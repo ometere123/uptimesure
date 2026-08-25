@@ -32,3 +32,10 @@ deno.lock
 *.keystore
 secrets.json
 .secrets
+
+# Vercel CLI project link and local build cache. Contains the project/org id, not a secret, but it is
+# machine-local state and must not be committed. `vercel link` also writes a .env.local holding an OIDC
+# token, which lines 4-6 already cover. Note that `vercel env pull` and `vercel dev` want to append a
+# blanket `.env*` here — do not let them: that pattern would silently swallow the tracked .env.example
+# files, and a future example file would go missing without an error.
+.vercel
