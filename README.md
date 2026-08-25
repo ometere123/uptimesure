@@ -176,7 +176,11 @@ The frontend and Edge Functions report zero known vulnerabilities. `contracts/` 
 
 ## Rialo migration
 
-The earlier Rialo-native prototype remains in `program/` and `web/`. It reached real DevNet Venus-program and REX-component deployment, and root transactions were accepted — but reliable asynchronous child callback lineage was **never proven**, so no claim of a working Rialo runtime integration is made here. UptimeSure V1 therefore uses infrastructure available today while keeping a direct migration path:
+The earlier Rialo-native prototype remains in `program/` and `web/`. It reached real DevNet Venus-program and REX-component deployment, and root transactions were accepted — but reliable asynchronous child callback lineage was **never proven**, so no claim of a working Rialo runtime integration is made here.
+
+The program does now compile, CI-verified by a real `cargo check` in `rialo-experimental-verify` rather than asserted. That is a statement about type-checking against `rialo-*` 0.10.x and nothing more: the run executes no code and reaches no network, so the unproven async callback path is exactly as unproven as before. See `docs/RIALO_MIGRATION.md` for the two DSL-grammar defects that had to be fixed to get there.
+
+UptimeSure V1 therefore uses infrastructure available today while keeping a direct migration path:
 
 ```text
 Supabase Cron        -> Rialo Workflow

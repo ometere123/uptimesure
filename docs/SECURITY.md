@@ -32,7 +32,7 @@ The constructor requires `monitor != msg.sender` and grants `DEFAULT_ADMIN_ROLE`
 - emergency pause is admin-only and halts observation processing
 - SafeERC20 and ReentrancyGuard protect every token movement path
 
-36 Hardhat tests cover these paths, including the boundary cases: maximum representable payout and coverage without overflow, counter saturation, settlement inside the post-expiry window, withdrawal blocked while settlement is open, and re-entrancy from a malicious token.
+The 36 tests in `contracts/test/UptimeSureCore.test.ts` cover these paths, including the boundary cases: maximum representable payout and coverage without overflow, counter saturation, settlement inside the post-expiry window, withdrawal blocked while settlement is open, and re-entrancy from a malicious token. A further 6 in `contracts/test/deployment-constants.test.ts` guard the deployment constants, for 42 in the Hardhat suite.
 
 ## Endpoint safeguards (SSRF)
 
@@ -70,15 +70,17 @@ Postgres is a read model. Deleting or editing an indexed row cannot move coverag
 - Deployer keys are never committed. `.gitignore` covers `*.pem`, `*.key`, `*.keystore`, `secrets.json` and `.secrets`, and only `.env.example` files are tracked.
 - The browser receives exactly five variables — `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL`, `NEXT_PUBLIC_UPTIMESURE_CONTRACT`, `NEXT_PUBLIC_USDC_ADDRESS`. `SUPABASE_SERVICE_ROLE_KEY`, `MONITOR_PRIVATE_KEY`, `CRON_SECRET` and any deployer key appear nowhere in `app/`, `lib/`, `components/` or the build output.
 
-The full history was scanned for 64-hex private keys, mnemonic phrases, Supabase secret formats (`eyJ`, `sbp_`) and common provider key prefixes (`sk-`, `ghp_`, `AKIA`, `AIza`, `xox`). No matching blob is present in any commit.
+Every blob in the repository's history was scanned for 64-hex private keys, mnemonic phrases, Supabase secret formats (`eyJ`, `sbp_`) and common provider key prefixes (`sk-`, `ghp_`, `AKIA`, `AIza`, `xox`). No matching blob is present in any commit.
+
+The scan enumerated objects with `git rev-list --objects --all`, so it covers unreachable-from-`main` blobs as well, and it was checked for completeness rather than assumed: **199 of 199** blobs across **54** commits were read, with zero skipped for size. Re-run it after any commit that touches deployment or monitoring configuration — the claim above is only as current as the last commit it was run against.
 
 ## Dependency posture
 
 The frontend and the Edge Functions report **zero known vulnerabilities**. Reaching that required upgrading `next` to 16.3.2 (which cleared four `postcss` advisories and the `sharp`/libvips CVEs), `viem` to 2.55.19 in both the frontend and the Edge Function import pins (clearing two `ws` advisories in the component that holds the monitor key), and `vitest` to 3.2.7 (clearing a critical advisory).
 
-`contracts/` still reports findings, and they are not silenced. Two were fixed with scoped `overrides`: `ws` pinned to 8.21.3 under `@ethersproject/providers` (which pins an exact vulnerable version, so `npm audit fix` was a no-op), and `lodash` to 4.18.1. What remains — `undici`, `adm-zip`, `serialize-javascript`, `tmp`, `uuid`, `bn.js`, `cookie`, `elliptic` — sits inside the Hardhat 2 developer toolchain and is fixable only by migrating to Hardhat 3 or hardhat-toolbox 7, both semver-major.
+`contracts/` still reports findings, and they are not silenced. `npm audit` there reports **42 advisories (20 low, 7 moderate, 15 high, 0 critical)**, arising from exactly eight packages: `undici`, `adm-zip`, `serialize-javascript`, `tmp`, `uuid`, `bn.js`, `cookie` and `elliptic`. Everything else in the report is a transitive path into one of those eight, so no root cause is undocumented here. Two further findings were fixed with scoped `overrides`: `ws` pinned to 8.21.3 under `@ethersproject/providers` (which pins an exact vulnerable version, so `npm audit fix` was a no-op), and `lodash` to 4.18.1 — both verified still applied, and `ws` no longer appears in the report at any version. The remaining eight sit inside the Hardhat 2 developer toolchain; `npm audit fix --force` resolves them only by installing `hardhat@3.14.0`, which it labels a breaking change.
 
-That migration is deliberately not bundled with this release. The contracts package produces **no runtime artifact**: what deploys is compiled EVM bytecode, and these advisories are reachable only by a developer or CI runner executing the local toolchain against hostile input. Forcing incompatible versions inside Hardhat's own dependency tree risks breaking the 36-test suite that proves the settlement contract safe, which would be a worse security outcome than a build-time advisory. Overrides were applied only where the change stays within a major and a cold compile plus the full suite was re-verified afterwards. Migrating to Hardhat 3 is tracked as follow-up work, not as done.
+That migration is deliberately not bundled with this release. The contracts package produces **no runtime artifact**: what deploys is compiled EVM bytecode, and these advisories are reachable only by a developer or CI runner executing the local toolchain against hostile input. Forcing incompatible versions inside Hardhat's own dependency tree risks breaking the 42-test suite that proves the settlement contract safe, which would be a worse security outcome than a build-time advisory. Overrides were applied only where the change stays within a major and a cold compile plus the full suite was re-verified afterwards. Migrating to Hardhat 3 is tracked as follow-up work, not as done.
 
 ## Mainnet gaps
 
