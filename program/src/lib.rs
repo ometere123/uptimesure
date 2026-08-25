@@ -9,6 +9,20 @@
 
 use rialo_venus_proc_macro::rialo;
 
+// Policy bounds for guarantee creation.
+//
+// Declared at module level rather than inside the rialo! program block: the DSL grammar in
+// rialo-venus-dsl 0.10.2 accepts `use` and function items inside that block but rejects `const`
+// items, so a const there aborts macro parsing with "unexpected token, expected `}`". Module scope
+// keeps them visible to the generated code without changing any value.
+const MIN_INTERVAL_SECS: u64 = 15;
+const MAX_INTERVAL_SECS: u64 = 86_400;
+const MAX_FAILURE_THRESHOLD: u64 = 20;
+const MAX_PAYOUTS: u64 = 100;
+const MAX_SERVICE_NAME_LEN: usize = 96;
+const MAX_URL_LEN: usize = 512;
+const MAX_FRAGMENT_LEN: usize = 128;
+
 rialo! {
     workflow {
         state {
@@ -87,14 +101,6 @@ rialo! {
             use rialo_rex_processor_interface::state::RexReport;
             use rialo_s_program_error::ProgramError;
             use rialo_types::RexOutput;
-
-            const MIN_INTERVAL_SECS: u64 = 15;
-            const MAX_INTERVAL_SECS: u64 = 86_400;
-            const MAX_FAILURE_THRESHOLD: u64 = 20;
-            const MAX_PAYOUTS: u64 = 100;
-            const MAX_SERVICE_NAME_LEN: usize = 96;
-            const MAX_URL_LEN: usize = 512;
-            const MAX_FRAGMENT_LEN: usize = 128;
 
             // Start one provider-funded service guarantee.
             initiating fn create_guarantee(
