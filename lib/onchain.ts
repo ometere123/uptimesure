@@ -33,6 +33,7 @@ export interface OnchainGuarantee {
   consecutiveFailures: number;
   active: boolean;
   withdrawn: boolean;
+  exhausted: boolean;
 }
 
 export interface OnchainGuaranteeState {
@@ -118,6 +119,7 @@ export function divergences(chain: OnchainGuarantee, indexed: GuaranteeRow): str
   compare("consecutive failures", chain.consecutiveFailures.toString(), String(indexed.consecutive_failures));
   compare("active", String(chain.active), String(indexed.active));
   compare("withdrawn", String(chain.withdrawn), String(indexed.withdrawn));
+  compare("exhausted", String(chain.exhausted), String(indexed.exhausted));
   compare("payout per incident", chain.payoutPerIncident.toString(), indexed.payout_per_incident);
   compare("provider", chain.provider.toLowerCase(), indexed.provider.toLowerCase());
   compare("beneficiary", chain.beneficiary.toLowerCase(), indexed.beneficiary.toLowerCase());

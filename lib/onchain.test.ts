@@ -29,6 +29,7 @@ function pair(): { chain: OnchainGuarantee; indexed: GuaranteeRow } {
     consecutiveFailures: 0,
     active: true,
     withdrawn: false,
+    exhausted: false,
   };
 
   const indexed: GuaranteeRow = {
@@ -55,6 +56,7 @@ function pair(): { chain: OnchainGuarantee; indexed: GuaranteeRow } {
     last_observed_at: "2025-10-09T07:43:20+00:00",
     consecutive_failures: 0,
     active: true,
+    exhausted: false,
     withdrawn: false,
     next_check_at: "2025-10-09T07:48:20+00:00",
     updated_at: "2025-10-09T07:43:20+00:00",

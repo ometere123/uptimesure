@@ -79,12 +79,13 @@ function describeError(error: unknown): string {
  * insert (a newly indexed guarantee becomes due immediately) and is left untouched on conflict, where the
  * monitor's lease bookkeeping owns it.
  */
-async function syncGuarantee(supabase: SupabaseClient, client: ChainClient, id: bigint): Promise<void> {
+async function syncGuarantee(supabase: SupabaseClient, client: ChainClient, id: bigint, blockNumber: bigint): Promise<void> {
   const g = await client.readContract({
     address: contractAddress(),
     abi: coreAbi,
     functionName: "getGuarantee",
     args: [id],
+    blockNumber,
   });
   if (!g.provider || /^0x0{40}$/i.test(g.provider)) return;
 
@@ -112,17 +113,19 @@ async function syncGuarantee(supabase: SupabaseClient, client: ChainClient, id: 
     last_observed_at: iso(g.lastObservedAt),
     consecutive_failures: Number(g.consecutiveFailures),
     active: g.active,
+    exhausted: g.exhausted,
     withdrawn: g.withdrawn,
   }, { onConflict: "id" });
   if (error) throw new Error(`GUARANTEE_UPSERT_FAILED:${id}:${error.message}`);
 }
 
-async function syncIncident(supabase: SupabaseClient, client: ChainClient, id: bigint): Promise<void> {
+async function syncIncident(supabase: SupabaseClient, client: ChainClient, id: bigint, blockNumber: bigint): Promise<void> {
   const incident = await client.readContract({
     address: contractAddress(),
     abi: coreAbi,
     functionName: "getIncident",
     args: [id],
+    blockNumber,
   });
   if (incident.guaranteeId === 0n) return;
 
@@ -146,6 +149,9 @@ interface ObservationEvent {
   healthy: boolean;
   evidenceHash: string;
   txHash: string;
+  blockNumber: number;
+  blockHash: string | null;
+  logIndex: number;
 }
 
 /**
@@ -158,7 +164,22 @@ interface ObservationEvent {
  * what closes the monitor's crash window: a monitor that broadcast successfully and died before recording the
  * hash leaves its row 'pending', and this promotes it to 'indexed' once the log is final.
  */
-async function reconcileObservations(supabase: SupabaseClient, events: ObservationEvent[]): Promise<void> {
+async function reconcileObservations(supabase: SupabaseClient, events: ObservationEvent[], fromBlock: bigint, toBlock: bigint): Promise<void> {
+  const identities = new Set(events.filter((e) => e.blockHash !== null).map((e) => `${e.blockHash}:${e.logIndex}`));
+  const { data: prior, error: priorError } = await supabase.from("observations")
+    .select("observation_id,chain_block_hash,chain_log_index,tx_hash,tx_status")
+    .gte("chain_block_number", Number(fromBlock)).lte("chain_block_number", Number(toBlock)).eq("chain_event_present", true);
+  if (priorError) throw new Error(`OBSERVATION_REORG_READ_FAILED:${priorError.message}`);
+  for (const row of prior ?? []) {
+    if (!identities.has(`${row.chain_block_hash}:${row.chain_log_index}`)) {
+      // Preserve all HTTP evidence, but remove the claim that the orphaned log is canonical. A later monitor
+      // retry may settle the same observation again using the unchanged evidence hash.
+      const { error } = await supabase.from("observations").update({
+        chain_event_present: false, tx_hash: null, tx_status: "failed", chain_error: "ORPHANED_CHAIN_LOG",
+      }).eq("observation_id", row.observation_id);
+      if (error) throw new Error(`OBSERVATION_REORG_INVALIDATE_FAILED:${error.message}`);
+    }
+  }
   if (events.length === 0) return;
 
   const { error: insertError } = await supabase.from("observations").upsert(
@@ -170,6 +191,10 @@ async function reconcileObservations(supabase: SupabaseClient, events: Observati
       evidence_hash: e.evidenceHash,
       tx_hash: e.txHash,
       tx_status: "indexed",
+      chain_block_number: e.blockNumber,
+      chain_block_hash: e.blockHash,
+      chain_log_index: e.logIndex,
+      chain_event_present: true,
     })),
     { onConflict: "observation_id", ignoreDuplicates: true },
   );
@@ -178,7 +203,8 @@ async function reconcileObservations(supabase: SupabaseClient, events: Observati
   for (const event of events) {
     const { error } = await supabase
       .from("observations")
-      .update({ tx_hash: event.txHash, tx_status: "indexed", chain_error: null })
+      .update({ tx_hash: event.txHash, tx_status: "indexed", chain_error: null, chain_block_number: event.blockNumber,
+        chain_block_hash: event.blockHash, chain_log_index: event.logIndex, chain_event_present: true })
       .eq("observation_id", event.observationId)
       .is("tx_hash", null);
     if (error) throw new Error(`OBSERVATION_TXHASH_FAILED:${event.observationId}:${error.message}`);
@@ -267,6 +293,8 @@ export default {
 
     const touchedGuarantees = new Set<string>();
     const touchedIncidents = new Set<string>();
+    const guaranteeIdentities = new Map<string, { blockNumber: number; blockHash: string | null; logIndex: number }>();
+    const incidentIdentities = new Map<string, { blockNumber: number; blockHash: string | null; logIndex: number }>();
     const observationEvents: ObservationEvent[] = [];
     // Only advanced after a chunk is fully processed, so a failure re-reads the chunk rather than skipping it.
     let processedThrough = fromBlock - 1n;
@@ -288,6 +316,9 @@ export default {
           const args = log.args as Record<string, unknown>;
           if (typeof args.guaranteeId === "bigint") touchedGuarantees.add(args.guaranteeId.toString());
           if (typeof args.incidentId === "bigint") touchedIncidents.add(args.incidentId.toString());
+          const identity = { blockNumber: Number(log.blockNumber), blockHash: log.blockHash ?? null, logIndex: Number(log.logIndex) };
+          if (log.eventName === "GuaranteeCreated" && typeof args.guaranteeId === "bigint") guaranteeIdentities.set(args.guaranteeId.toString(), identity);
+          if (log.eventName === "IncidentConfirmed" && typeof args.incidentId === "bigint") incidentIdentities.set(args.incidentId.toString(), identity);
           if (log.eventName === "ObservationRecorded" && log.transactionHash) {
             observationEvents.push({
               observationId: String(args.observationId),
@@ -296,6 +327,9 @@ export default {
               healthy: Boolean(args.healthy),
               evidenceHash: String(args.evidenceHash),
               txHash: log.transactionHash,
+              blockNumber: Number(log.blockNumber),
+              blockHash: log.blockHash ?? null,
+              logIndex: Number(log.logIndex),
             });
           }
         }
@@ -303,11 +337,36 @@ export default {
         chunkStart = chunkEnd + 1n;
       }
 
-      await reconcileObservations(supabase, observationEvents);
+      await reconcileObservations(supabase, observationEvents, fromBlock, targetBlock);
       // Contract reads resolve current state, so ordering between guarantees and incidents does not matter and
       // a repeated run cannot drift the row away from the chain.
-      for (const id of touchedGuarantees) await syncGuarantee(supabase, client, BigInt(id));
-      for (const id of touchedIncidents) await syncIncident(supabase, client, BigInt(id));
+      for (const id of touchedGuarantees) await syncGuarantee(supabase, client, BigInt(id), targetBlock);
+      for (const id of touchedIncidents) await syncIncident(supabase, client, BigInt(id), targetBlock);
+      for (const [id, identity] of guaranteeIdentities) {
+        const { error } = await supabase.from("guarantees").update({ ...identity, chain_event_present: true }).eq("id", Number(id));
+        if (error) throw new Error(`GUARANTEE_IDENTITY_UPSERT_FAILED:${id}:${error.message}`);
+      }
+      for (const [id, identity] of incidentIdentities) {
+        const { error } = await supabase.from("incidents").update({ ...identity, chain_event_present: true }).eq("id", Number(id));
+        if (error) throw new Error(`INCIDENT_IDENTITY_UPSERT_FAILED:${id}:${error.message}`);
+      }
+      // Reprocessing a range must also remove projections whose originating log was orphaned. These updates
+      // invalidate only chain-derived rows; observation HTTP evidence remains untouched by this reconciliation.
+      for (const table of ["guarantees", "incidents"] as const) {
+        const { data: prior, error } = await supabase.from(table)
+          .select(`id,chain_block_hash,chain_log_index`)
+          .gte("chain_block_number", Number(fromBlock)).lte("chain_block_number", Number(targetBlock))
+          .eq("chain_event_present", true);
+        if (error) throw new Error(`CHAIN_REORG_READ_FAILED:${table}:${error.message}`);
+        const canonical = table === "guarantees" ? guaranteeIdentities : incidentIdentities;
+        for (const row of prior ?? []) {
+          const identity = canonical.get(String(row.id));
+          if (!identity || identity.blockHash !== row.chain_block_hash || identity.logIndex !== row.chain_log_index) {
+            const { error: invalidateError } = await supabase.from(table).update({ chain_event_present: false }).eq("id", row.id);
+            if (invalidateError) throw new Error(`CHAIN_REORG_INVALIDATE_FAILED:${table}:${row.id}:${invalidateError.message}`);
+          }
+        }
+      }
     } catch (error) {
       // Progress up to the last fully processed chunk is still committed, and the reason is persisted so a
       // stalled indexer is visible on the status page instead of failing silently.

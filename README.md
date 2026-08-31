@@ -2,7 +2,7 @@
 
 > **Put money behind your uptime promise.**
 
-UptimeSure is an executable service-guarantee product for APIs, RPCs, webhooks and online infrastructure. A provider fully funds its maximum promised liability in Circle test USDC on Base Sepolia. Supabase Cron checks the real HTTPS service through Edge Functions. Deterministic breach state is committed onchain. When the configured failure threshold and minimum outage duration are satisfied, the contract compensates the fixed beneficiary automatically.
+UptimeSure V1 is an executable uptime-guarantee product for public, unauthenticated HTTPS GET endpoints. A provider fully funds its maximum promised liability in Circle test USDC on Base Sepolia. Supabase Cron checks the real HTTPS service through Edge Functions. Deterministic breach state is committed onchain. When the configured failure threshold and minimum outage duration are satisfied, the contract compensates the fixed beneficiary automatically. Authenticated APIs, JSON-RPC POST checks and webhook delivery guarantees are future adapters, not supported V1 behavior.
 
 There is no AI in the payout path and no mock monitoring data.
 
@@ -51,7 +51,7 @@ This keeps the financial state deterministic without spending a Base Sepolia tra
 
 `contracts/contracts/UptimeSureCore.sol` enforces the financial and lifecycle rules. The monitoring signer cannot choose recipients or payout amounts.
 
-A new guarantee specifies: beneficiary, HTTPS endpoint, expected HTTP status, optional expected body fragment, maximum latency, check interval, consecutive-failure threshold, minimum outage duration, payout per confirmed incident, maximum payout count, expiry, and fully funded coverage.
+A new guarantee specifies: beneficiary, public HTTPS GET endpoint, expected HTTP status, optional expected body fragment, maximum completed-response latency, check interval, consecutive-failure threshold, minimum outage duration, payout per confirmed incident, maximum payout count, expiry, and fully funded coverage.
 
 Enforced bounds:
 
@@ -75,7 +75,7 @@ The contract rejects an underfunded promise: coverage must be at least `payoutPe
 
 Supabase is not the source of truth for funds. Deleting or modifying an indexed row cannot move coverage. Base Sepolia contract state remains authoritative for beneficiary, liability, incident and payout rules.
 
-The monitor runs once per minute and processes at most 10 due guarantees per invocation, 5 concurrently. Guarantees are claimed through an atomic lease (`claim_due_guarantees` / `complete_monitor_run`) rather than a bare `next_check_at <= now()` select, so two overlapping invocations cannot both submit an observation for the same scheduled slot, and a crashed run is reclaimed after its lease expires instead of stalling.
+The monitor runs once per minute and processes at most 10 due guarantees per invocation, 5 concurrently. Guarantees are claimed through an atomic lease (`claim_due_guarantees` / `complete_monitor_run`) rather than a bare `next_check_at <= now()` select. A completed probe is immutable for its scheduled slot: chain read, simulation, broadcast or receipt failures leave the same observation queued for retry without another HTTP request.
 
 Normal healthy observations are evidence-only; chain writes are reserved for failures and recovery resets.
 
@@ -147,6 +147,8 @@ MONITOR_PRIVATE_KEY
 
 GitHub Actions `product-verify` is the canonical release gate for every PR and push to `main`:
 
+The workflow is present and action references are pinned to immutable commits where used. GitHub branch protection/rulesets are repository-account settings; they are not enabled by this code change and must be configured by a repository administrator before treating `main` as enforced.
+
 ```text
 web:              npm ci -> tests -> typecheck -> production build
 contracts:        npm ci -> compile -> typecheck -> Hardhat tests
@@ -175,7 +177,7 @@ Two checks now catch that class of mistake without needing to know the right ans
 
 ## Dependency posture
 
-The frontend and Edge Functions report zero known vulnerabilities. `contracts/` still reports advisories inside the Hardhat 2 developer toolchain; they are documented rather than silenced, because that package produces no runtime artifact and clearing them requires a semver-major Hardhat 3 migration that would risk the test suite proving the settlement contract safe. See `docs/SECURITY.md` for the full position and the two scoped overrides that were applied.
+The root frontend audit reports 0 vulnerabilities. `contracts/` reports 42 transitive build-tool vulnerabilities in Hardhat 2; they are documented rather than silenced, because clearing them requires a semver-major Hardhat 3 migration that would risk the test suite proving the settlement contract safe. See `docs/SECURITY.md` for the exact report.
 
 ## Rialo migration
 

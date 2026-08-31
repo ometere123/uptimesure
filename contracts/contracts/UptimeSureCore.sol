@@ -79,6 +79,10 @@ contract UptimeSureCore is AccessControl, Pausable, ReentrancyGuard {
         uint8 consecutiveFailures;
         bool active;
         bool withdrawn;
+        /// @notice True once no further payable incident can be funded.
+        /// @dev This is deliberately separate from `active`: an open final incident must still accept a
+        /// recovery observation, while exhaustion must prevent every later payable incident.
+        bool exhausted;
     }
 
     struct Incident {
@@ -201,7 +205,8 @@ contract UptimeSureCore is AccessControl, Pausable, ReentrancyGuard {
             lastObservedAt: 0,
             consecutiveFailures: 0,
             active: true,
-            withdrawn: false
+            withdrawn: false,
+            exhausted: false
         });
 
         _pullExactly(msg.sender, p.coverageAmount);
@@ -347,7 +352,9 @@ contract UptimeSureCore is AccessControl, Pausable, ReentrancyGuard {
         bool outageLongEnough = observedAt >= g.firstFailureAt + g.minOutageSecs;
         // One confirmed incident per outage: further failures accumulate but cannot pay again until the
         // endpoint recovers and a new outage begins.
-        if (!thresholdReached || !outageLongEnough || activeIncidentId[guaranteeId] != 0) return;
+        // Once coverage is exhausted, the current final incident may still recover, but no new incident is
+        // created and no new liability can arise.
+        if (!thresholdReached || !outageLongEnough || activeIncidentId[guaranteeId] != 0 || g.exhausted) return;
 
         uint96 payout = 0;
         if (g.paidPayouts < g.maxPayouts && g.remainingCoverage >= g.payoutPerIncident) {
@@ -369,7 +376,7 @@ contract UptimeSureCore is AccessControl, Pausable, ReentrancyGuard {
         activeIncidentId[guaranteeId] = incidentId;
 
         bool exhausted = g.paidPayouts >= g.maxPayouts || g.remainingCoverage < g.payoutPerIncident;
-        if (exhausted) g.active = false;
+        if (exhausted) g.exhausted = true;
 
         // Checks-effects-interactions: every storage write and every event is finalised before the external
         // token call, so a hostile or callback-bearing coverage token cannot observe or re-enter partial state.

@@ -12,7 +12,7 @@ import { baseSepolia } from "npm:viem@2.55.19/chains";
 
 export const coreAbi = parseAbi([
   "function submitObservation(uint256 guaranteeId, bytes32 observationId, bool healthy, bytes32 evidenceHash, uint64 observedAt)",
-  "function getGuarantee(uint256 guaranteeId) view returns ((address provider,address beneficiary,string endpointUrl,bytes32 criteriaHash,uint16 expectedStatus,string expectedFragment,uint32 maxLatencyMs,uint32 checkIntervalSecs,uint8 failureThreshold,uint32 minOutageSecs,uint96 payoutPerIncident,uint16 maxPayouts,uint16 paidPayouts,uint256 remainingCoverage,uint64 createdAt,uint64 expiresAt,uint64 firstFailureAt,uint64 lastObservedAt,uint8 consecutiveFailures,bool active,bool withdrawn))",
+  "function getGuarantee(uint256 guaranteeId) view returns ((address provider,address beneficiary,string endpointUrl,bytes32 criteriaHash,uint16 expectedStatus,string expectedFragment,uint32 maxLatencyMs,uint32 checkIntervalSecs,uint8 failureThreshold,uint32 minOutageSecs,uint96 payoutPerIncident,uint16 maxPayouts,uint16 paidPayouts,uint256 remainingCoverage,uint64 createdAt,uint64 expiresAt,uint64 firstFailureAt,uint64 lastObservedAt,uint8 consecutiveFailures,bool active,bool withdrawn,bool exhausted))",
   "function getIncident(uint256 incidentId) view returns ((uint256 guaranteeId,uint64 startedAt,uint64 confirmedAt,uint64 recoveredAt,uint96 payoutAmount,bytes32 confirmEvidenceHash,bytes32 recoveryEvidenceHash))",
   // Read before submitting so a monitor that crashed after broadcasting does not resubmit and revert.
   "function observationUsed(bytes32 replayKey) view returns (bool)",

@@ -22,6 +22,7 @@ export type GuaranteeRow = {
   last_observed_at: string | null;
   consecutive_failures: number;
   active: boolean;
+  exhausted: boolean;
   withdrawn: boolean;
   next_check_at: string;
   updated_at: string;
@@ -34,7 +35,7 @@ export type ObservationRow = {
   healthy: boolean;
   http_status: number | null;
   latency_ms: number | null;
-  body_sha256: string | null;
+  body_keccak256: string | null;
   evidence_hash: string;
   error_code: string | null;
   chain_error: string | null;

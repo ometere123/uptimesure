@@ -22,8 +22,8 @@ jobs:
     name: frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -43,8 +43,8 @@ jobs:
       run:
         working-directory: contracts
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -63,8 +63,8 @@ jobs:
     name: edge-functions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: denoland/setup-deno@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
       - name: Type-check monitor
@@ -84,7 +84,7 @@ jobs:
       # the scan reading one commit's blobs, finding nothing, and passing -- a green check that
       # verified essentially nothing. The script refuses to run on a shallow clone for that reason,
       # so removing this line fails the job loudly instead of silently weakening it.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Scan every blob in history for committed secrets
@@ -105,7 +105,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Create the Supabase-managed roles the grants target
         # The plain postgres image has no anon/authenticated/service_role, so every
         # revoke/grant in the migrations - and the privilege assertions that check

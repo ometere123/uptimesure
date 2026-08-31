@@ -32,11 +32,11 @@ export interface EvidencePayload {
   observationId: `0x${string}`;
   /** The exact URL probed, after target-policy normalisation. */
   url: string;
-  /** Unix seconds at which the probe completed. Matches the value passed to submitObservation. */
+  /** Unix seconds at completion of the bounded response measurement. Matches the value passed onchain. */
   observedAt: number;
   /** HTTP status observed, or 0 when no response arrived. */
   status: number;
-  /** Wall-clock milliseconds until the response headers arrived. */
+  /** Wall-clock milliseconds until the bounded response body read completed (or the request failed). */
   latencyMs: number;
   /** Whether the observation satisfied every criterion in the guarantee policy. */
   healthy: boolean;
