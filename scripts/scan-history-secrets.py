@@ -41,6 +41,13 @@ PATTERNS = {
     "slack token": re.compile(rb"xox[baprs]-[0-9A-Za-z-]{10,}"),
 }
 
+# These two fields are deliberately public chain evidence, not credentials. Keep this exception
+# structural and path-scoped: a 64-hex value anywhere else remains a hit, and the exception does not
+# allowlist arbitrary hashes or weaken the token/mnemonic patterns.
+PUBLIC_DEPLOYMENT_HASH_FIELDS = re.compile(
+    rb'"(?:deploymentTransaction|monitorRole)"\s*:\s*"(?:0x)?[0-9a-fA-F]{64}"'
+)
+
 # BIP-39 phrases start from a fixed 2048-word list. Twelve-plus lowercase words in a row beginning
 # with one of the early entries is the signature of a committed seed phrase.
 MNEMONIC = re.compile(
@@ -105,6 +112,12 @@ def main() -> int:
         scanned += 1
         for label, rx in PATTERNS.items():
             for m in rx.finditer(data):
+                if (
+                    label == "64-hex private key"
+                    and names.get(oid) == "deployments/base-sepolia.json"
+                    and any(m.start() >= field.start() and m.end() <= field.end() for field in PUBLIC_DEPLOYMENT_HASH_FIELDS.finditer(data))
+                ):
+                    continue
                 hits.append((label, names.get(oid, oid), m.group(0)[:16].decode("latin-1")))
         if MNEMONIC.search(data):
             hits.append(("bip39 mnemonic", names.get(oid, oid), "<phrase>"))
