@@ -1,14 +1,14 @@
 {
   "network": "base-sepolia",
   "chainId": 84532,
-  "contractAddress": null,
+  "contractAddress": "0x33201336B112947BAcC3Fd6522B3093fb35cB2f4",
   "usdcAddress": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
-  "deployer": null,
-  "deploymentTransaction": null,
-  "deploymentBlock": null,
-  "monitorAddress": null,
-  "monitorRole": null,
-  "sourceCommit": null,
-  "deployedAt": null,
-  "status": "awaiting-deployment"
+  "deployer": "0x231EF01E282385eC2E22394469f1C8c6C28Fd6b1",
+  "deploymentTransaction": "0xd306ca6cbf540ae4a93c8e2b37526b6fcb66d1c8883a689b188cc06b1f565980",
+  "deploymentBlock": 46232391,
+  "monitorAddress": "0xBa802a49790CEFFDa0b50698457AC134319BeED3",
+  "monitorRole": "0x8227712ef8ad39d0f26f06731ef0df8665eb7ada7f41b1ee089adf3c238862a2",
+  "sourceCommit": "9ba2bf3a2586dee6b7caeb0d2bdf877adf38a931",
+  "deployedAt": "2026-09-01T03:24:29.001Z",
+  "status": "deployed"
 }
