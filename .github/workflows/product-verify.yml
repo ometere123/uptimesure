@@ -177,5 +177,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql
           echo "$(pg_config --bindir)" >> "$GITHUB_PATH"
+          echo "PGBIN=$(pg_config --bindir)" >> "$GITHUB_ENV"
       - name: Run verify-all.sh on Ubuntu
         run: bash scripts/verify-all.sh
