@@ -32,6 +32,7 @@ import { authorizeCron, cronRejection, json } from "../_shared/auth.ts";
 import { contractAddress, coreAbi, monitorWallet, observationReplayKey, publicClient } from "../_shared/chain.ts";
 import { evidenceHash, hashBytes, observationId as deriveObservationId } from "../_shared/evidence.ts";
 import { assertSafeTarget, TargetRejected } from "../_shared/ssrf.ts";
+import { settleEvidence } from "../_shared/settlement.ts";
 
 /** One row returned by `claim_due_guarantees`: the policy plus the lease that authorises acting on it. */
 interface Claim {
@@ -360,49 +361,30 @@ async function settleOnchain(
   const client = publicClient();
   const address = contractAddress();
   const { wallet, account } = monitorWallet();
-  const { request } = await client.simulateContract({
-    address,
-    abi: coreAbi,
-    functionName: "submitObservation",
-    args: [BigInt(claim.guarantee_id), observationId, result.healthy, digest, BigInt(observedAt)],
-    account,
+  const settled = await settleEvidence({
+    observationId, evidenceHash: digest, observedAt, healthy: result.healthy,
+    status: result.status, latencyMs: result.latencyMs, bodyDigest: result.bodyDigest, reason: result.reason,
+  }, { txStatus: "pending", txHash: null }, {
+    isObservationUsed: async () => false, // readChainState already performed this replay-guard read above
+    simulate: async () => {
+      const { request } = await client.simulateContract({
+        address, abi: coreAbi, functionName: "submitObservation",
+        args: [BigInt(claim.guarantee_id), observationId, result.healthy, digest, BigInt(observedAt)], account,
+      });
+      return request;
+    },
+    broadcast: async (_evidence, simulation) => wallet.writeContract(simulation as Parameters<typeof wallet.writeContract>[0]),
+    receipt: async (hash) => {
+      const receipt = await client.waitForTransactionReceipt({ hash: hash as `0x${string}`, confirmations: 1, timeout: RECEIPT_TIMEOUT_MS });
+      return receipt.status === "success" ? "success" : "reverted";
+    },
+    persist: async (patch) => patchObservation(supabase, observationId, {
+      tx_hash: patch.txHash,
+      tx_status: patch.txStatus === "pending" ? "failed" : patch.txStatus,
+      chain_error: patch.error?.slice(0, 240) ?? null,
+    }),
   });
-
-  const txHash = await wallet.writeContract(request);
-  // Recorded before waiting: if the invocation dies during the wait the hash is not lost, and the
-  // observationUsed check on the next attempt makes the retry a no-op rather than a double submission.
-  // 'submitted' rather than 'pending' because a hash now exists — the row needs its receipt looking up, not
-  // its transaction sending, and observations_tx_hash_presence enforces that distinction.
-  await patchObservation(supabase, observationId, {
-    tx_hash: txHash,
-    tx_status: "submitted",
-    chain_error: null,
-  });
-
-  let receipt;
-  try {
-    receipt = await client.waitForTransactionReceipt({
-      hash: txHash,
-      confirmations: 1,
-      timeout: RECEIPT_TIMEOUT_MS,
-    });
-  } catch (error) {
-    // The transaction hash is durable. A timeout is not a failed settlement: keep the exact broadcast in
-    // `submitted` and let the next run reconcile the receipt without broadcasting a second transaction.
-    await patchObservation(supabase, observationId, {
-      tx_hash: txHash,
-      tx_status: "submitted",
-      chain_error: `RECEIPT_PENDING:${describeError(error)}`.slice(0, 240),
-    });
-    return { chain: "submitted", txHash };
-  }
-  const succeeded = receipt.status === "success";
-  await patchObservation(supabase, observationId, {
-    tx_hash: txHash,
-    tx_status: succeeded ? "confirmed" : "failed",
-    chain_error: succeeded ? null : "TRANSACTION_REVERTED",
-  });
-  return { chain: succeeded ? "confirmed" : "failed", txHash };
+  return { chain: settled.txStatus === "confirmed" ? "confirmed" : settled.txStatus === "submitted" ? "submitted" : "failed", txHash: settled.txHash ?? null };
 }
 
 /**

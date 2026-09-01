@@ -151,3 +151,24 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: psql -h localhost -U postgres -v ON_ERROR_STOP=1 -f supabase/tests/schema_assertions.sql
+
+  verification-script:
+    name: verification-script-linux
+    runs-on: ubuntu-latest
+    # This is an executable parity check for the repository handoff script. The database portion is
+    # intentionally covered by the stronger sql job above, which supplies the Postgres service and
+    # Supabase-managed role shims that verify-all.sh cannot assume on a developer laptop.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+      - run: npm ci --no-audit --no-fund
+      - run: npm --prefix contracts ci --no-audit --no-fund
+      - name: Run verify-all.sh on Ubuntu
+        run: bash scripts/verify-all.sh

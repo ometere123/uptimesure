@@ -205,7 +205,7 @@ export type DnsResolver = (hostname: string, recordType: "A" | "AAAA") => Promis
 
 const denoResolver: DnsResolver = async (hostname, recordType) => {
   // deno-lint-ignore no-explicit-any
-  const resolve = (Deno as any)?.resolveDns;
+  const resolve = (globalThis as { Deno?: { resolveDns?: unknown } }).Deno?.resolveDns;
   if (typeof resolve !== "function") throw new TargetRejected("DNS_RESOLUTION_FAILED", "resolveDns unavailable");
   return await resolve(hostname, recordType) as string[];
 };
