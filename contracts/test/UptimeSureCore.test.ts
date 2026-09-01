@@ -454,7 +454,8 @@ describe("UptimeSureCore", function () {
     const g = await core.getGuarantee(1);
     expect(g.paidPayouts).to.equal(2);
     expect(g.remainingCoverage).to.equal(0);
-    expect(g.active).to.equal(false);
+    expect(g.active).to.equal(true);
+    expect(g.exhausted).to.equal(true);
     expect(await core.nextIncidentId()).to.equal(3);
   });
 
@@ -557,7 +558,7 @@ describe("UptimeSureCore", function () {
     await expect(submitNow(core, monitor, true, "unpaused")).to.emit(core, "ObservationRecorded");
   });
 
-  it("exhausts a one-payout guarantee and rejects further observations", async function () {
+  it("exhausts a one-payout guarantee, accepts recovery, and rejects new liability", async function () {
     const { monitor, beneficiary, token, core, payout } = await fixture(1);
     const before = await token.balanceOf(beneficiary.address);
     await submitNow(core, monitor, false, "exhaust-1");
@@ -567,15 +568,22 @@ describe("UptimeSureCore", function () {
     await expect(submitNow(core, monitor, false, "exhaust-3")).to.emit(core, "GuaranteeExhausted");
 
     const g = await core.getGuarantee(1);
-    expect(g.active).to.equal(false);
+    expect(g.active).to.equal(true);
+    expect(g.exhausted).to.equal(true);
     expect(g.remainingCoverage).to.equal(0);
     expect(await token.balanceOf(beneficiary.address)).to.equal(before + payout);
 
     await advance(60);
-    await expect(submitNow(core, monitor, true, "exhaust-4")).to.be.revertedWithCustomError(
-      core,
-      "GuaranteeNotActive",
-    );
+    await expect(submitNow(core, monitor, true, "exhaust-4")).to.emit(core, "IncidentRecovered");
+    expect(await core.activeIncidentId(1)).to.equal(0);
+    await advance(60);
+    await submitNow(core, monitor, false, "exhaust-5");
+    await advance(60);
+    await submitNow(core, monitor, false, "exhaust-6");
+    await advance(60);
+    await submitNow(core, monitor, false, "exhaust-7");
+    expect(await core.nextIncidentId()).to.equal(2);
+    expect(await token.balanceOf(beneficiary.address)).to.equal(before + payout);
   });
 
   // -------------------------------------------------------------------------

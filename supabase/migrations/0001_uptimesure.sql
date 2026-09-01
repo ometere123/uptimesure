@@ -27,6 +27,7 @@ create table if not exists public.guarantees (
   last_observed_at timestamptz,
   consecutive_failures integer not null default 0,
   active boolean not null default true,
+  exhausted boolean not null default false,
   withdrawn boolean not null default false,
   next_check_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -39,7 +40,7 @@ create table if not exists public.observations (
   healthy boolean not null,
   http_status integer,
   latency_ms integer,
-  body_sha256 text,
+  body_keccak256 text,
   evidence_hash text not null,
   error_code text,
   tx_hash text,

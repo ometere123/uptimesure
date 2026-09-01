@@ -39,6 +39,25 @@ end;
 $$;
 
 do $$
+declare
+  missing text;
+begin
+  select string_agg(x.table_name || '.' || x.column_name, ', ' order by x.table_name, x.column_name) into missing
+  from (values
+    ('observations', 'body_keccak256'), ('observations', 'chain_block_number'),
+    ('observations', 'chain_block_hash'), ('observations', 'chain_log_index'),
+    ('observations', 'chain_event_present'), ('monitor_runs', 'settlement_pending'),
+    ('guarantees', 'chain_block_number'), ('guarantees', 'exhausted'), ('incidents', 'chain_block_number')
+  ) as x(table_name, column_name)
+  where not exists (
+    select 1 from information_schema.columns c
+    where c.table_schema = 'public' and c.table_name = x.table_name and c.column_name = x.column_name
+  );
+  if missing is not null then raise exception 'durable queue/canonical identity columns missing: %', missing; end if;
+end;
+$$;
+
+do $$
 begin
   if not exists (
     select 1 from information_schema.views where table_schema = 'public' and table_name = 'chain_sync_public'

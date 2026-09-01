@@ -18,8 +18,8 @@
  *      evidence columns are never rewritten, so the `evidence_hash` in the database always matches the one the
  *      contract recorded.
  *
- *   4. The schedule always advances. `complete_monitor_run` runs in a finally block on every path, so a thrown
- *      error cannot leave a guarantee permanently due and spin the cron into a hot loop.
+ *   4. Evidence and settlement are separate durable phases. A chain failure leaves the same slot queued with
+ *      its original evidence; only a completed settlement (or an explicit non-chain outcome) advances time.
  *
  * Gas policy: every failure is submitted onchain, and so is any healthy observation that has onchain work to do
  * (resetting a failure streak or recovering an open incident). A healthy observation against a guarantee that
@@ -32,6 +32,7 @@ import { authorizeCron, cronRejection, json } from "../_shared/auth.ts";
 import { contractAddress, coreAbi, monitorWallet, observationReplayKey, publicClient } from "../_shared/chain.ts";
 import { evidenceHash, hashBytes, observationId as deriveObservationId } from "../_shared/evidence.ts";
 import { assertSafeTarget, TargetRejected } from "../_shared/ssrf.ts";
+import { settleEvidence } from "../_shared/settlement.ts";
 
 /** One row returned by `claim_due_guarantees`: the policy plus the lease that authorises acting on it. */
 interface Claim {
@@ -78,6 +79,21 @@ interface ProbeResult {
   latencyMs: number;
   bodyDigest: `0x${string}`;
   reason: string;
+  /** Unix seconds at completion of the bounded response measurement. */
+  observedAt: number;
+}
+
+interface StoredObservation {
+  observation_id: `0x${string}`;
+  observed_at: string;
+  healthy: boolean;
+  http_status: number | null;
+  latency_ms: number | null;
+  body_keccak256: `0x${string}` | null;
+  evidence_hash: `0x${string}`;
+  error_code: string | null;
+  tx_hash: `0x${string}` | null;
+  tx_status: ChainStatus;
 }
 
 /** Contract state read once per slot, before probing. `null` when the RPC endpoint could not be reached. */
@@ -164,8 +180,9 @@ async function probe(url: URL, claim: Claim): Promise<ProbeResult> {
       signal: controller.signal,
       headers: { accept: "*/*", "user-agent": "UptimeSure-Monitor/1.0 (+https://github.com/ometere123/uptimesure)" },
     });
-    const latencyMs = Math.round(performance.now() - started);
     const body = await readBoundedBody(response);
+    const latencyMs = Math.round(performance.now() - started);
+    const observedAt = Math.floor(Date.now() / 1000);
     const statusOk = response.status === claim.expected_status;
     const latencyOk = latencyMs <= claim.max_latency_ms;
     const fragmentOk = claim.expected_fragment === "" ||
@@ -178,6 +195,7 @@ async function probe(url: URL, claim: Claim): Promise<ProbeResult> {
       latencyMs,
       bodyDigest: hashBytes(body),
       reason: healthy ? "OK" : !statusOk ? "STATUS_MISMATCH" : !fragmentOk ? "BODY_MISMATCH" : "LATENCY_BREACH",
+      observedAt,
     };
   } catch (error) {
     return {
@@ -186,6 +204,7 @@ async function probe(url: URL, claim: Claim): Promise<ProbeResult> {
       latencyMs: Math.round(performance.now() - started),
       bodyDigest: EMPTY_BODY_DIGEST,
       reason: classifyFetchError(error),
+      observedAt: Math.floor(Date.now() / 1000),
     };
   } finally {
     clearTimeout(timeout);
@@ -249,6 +268,18 @@ async function patchObservation(
   // A failed status write is not worth abandoning the run over: the chain is the source of truth and the
   // indexer reconciles the row. Surfaced through the run's last_error instead.
   if (error) console.error(`chain_status_write_failed observation=${observationId} reason=${error.message}`);
+}
+
+async function loadObservation(
+  supabase: SupabaseClient,
+  observationId: `0x${string}`,
+): Promise<StoredObservation | null> {
+  const { data, error } = await supabase.from("observations")
+    .select("observation_id,observed_at,healthy,http_status,latency_ms,body_keccak256,evidence_hash,error_code,tx_hash,tx_status")
+    .eq("observation_id", observationId)
+    .maybeSingle();
+  if (error) throw new Error(`OBSERVATION_READ_FAILED:${error.message}`);
+  return data as StoredObservation | null;
 }
 
 /**
@@ -330,37 +361,30 @@ async function settleOnchain(
   const client = publicClient();
   const address = contractAddress();
   const { wallet, account } = monitorWallet();
-  const { request } = await client.simulateContract({
-    address,
-    abi: coreAbi,
-    functionName: "submitObservation",
-    args: [BigInt(claim.guarantee_id), observationId, result.healthy, digest, BigInt(observedAt)],
-    account,
+  const settled = await settleEvidence({
+    observationId, evidenceHash: digest, observedAt, healthy: result.healthy,
+    status: result.status, latencyMs: result.latencyMs, bodyDigest: result.bodyDigest, reason: result.reason,
+  }, { txStatus: "pending", txHash: null }, {
+    isObservationUsed: async () => false, // readChainState already performed this replay-guard read above
+    simulate: async () => {
+      const { request } = await client.simulateContract({
+        address, abi: coreAbi, functionName: "submitObservation",
+        args: [BigInt(claim.guarantee_id), observationId, result.healthy, digest, BigInt(observedAt)], account,
+      });
+      return request;
+    },
+    broadcast: async (_evidence, simulation) => wallet.writeContract(simulation as Parameters<typeof wallet.writeContract>[0]),
+    receipt: async (hash) => {
+      const receipt = await client.waitForTransactionReceipt({ hash: hash as `0x${string}`, confirmations: 1, timeout: RECEIPT_TIMEOUT_MS });
+      return receipt.status === "success" ? "success" : "reverted";
+    },
+    persist: async (patch) => patchObservation(supabase, observationId, {
+      tx_hash: patch.txHash,
+      tx_status: patch.txStatus === "pending" ? "failed" : patch.txStatus,
+      chain_error: patch.error?.slice(0, 240) ?? null,
+    }),
   });
-
-  const txHash = await wallet.writeContract(request);
-  // Recorded before waiting: if the invocation dies during the wait the hash is not lost, and the
-  // observationUsed check on the next attempt makes the retry a no-op rather than a double submission.
-  // 'submitted' rather than 'pending' because a hash now exists — the row needs its receipt looking up, not
-  // its transaction sending, and observations_tx_hash_presence enforces that distinction.
-  await patchObservation(supabase, observationId, {
-    tx_hash: txHash,
-    tx_status: "submitted",
-    chain_error: null,
-  });
-
-  const receipt = await client.waitForTransactionReceipt({
-    hash: txHash,
-    confirmations: 1,
-    timeout: RECEIPT_TIMEOUT_MS,
-  });
-  const succeeded = receipt.status === "success";
-  await patchObservation(supabase, observationId, {
-    tx_hash: txHash,
-    tx_status: succeeded ? "confirmed" : "failed",
-    chain_error: succeeded ? null : "TRANSACTION_REVERTED",
-  });
-  return { chain: succeeded ? "confirmed" : "failed", txHash };
+  return { chain: settled.txStatus === "confirmed" ? "confirmed" : settled.txStatus === "submitted" ? "submitted" : "failed", txHash: settled.txHash ?? null };
 }
 
 /**
@@ -413,7 +437,7 @@ async function recordUnmonitorable(
  * one broken guarantee cannot abort the batch or leave the others' leases held until they expire.
  */
 async function processClaim(supabase: SupabaseClient, claim: Claim): Promise<Outcome> {
-  const observedAt = Math.floor(Date.now() / 1000);
+  let settlementPending = false;
   const outcome: Outcome = {
     guaranteeId: claim.guarantee_id,
     scheduledFor: claim.scheduled_for,
@@ -430,18 +454,55 @@ async function processClaim(supabase: SupabaseClient, claim: Claim): Promise<Out
   try {
     const observationId = deriveObservationId(BigInt(claim.guarantee_id), claim.scheduled_for);
 
+    // A row for this slot is the durable handoff between probing and settlement. Once present, its evidence
+    // is immutable: retries reconstruct the exact chain arguments and never call the endpoint again.
+    const stored = await loadObservation(supabase, observationId);
+    if (stored) {
+      outcome.healthy = stored.healthy;
+      outcome.status = stored.http_status;
+      outcome.latencyMs = stored.latency_ms;
+      outcome.reason = stored.error_code ?? "STORED_EVIDENCE";
+      if (stored.tx_status === "unmonitorable" || stored.tx_status === "not_required" || stored.tx_status === "confirmed" || stored.tx_status === "indexed") {
+        outcome.chain = stored.tx_status;
+        outcome.txHash = stored.tx_hash;
+        return outcome;
+      }
+      if (stored.tx_status === "submitted" && stored.tx_hash) {
+        try {
+          const receipt = await publicClient().waitForTransactionReceipt({ hash: stored.tx_hash, confirmations: 1, timeout: RECEIPT_TIMEOUT_MS });
+          const ok = receipt.status === "success";
+          await patchObservation(supabase, observationId, { tx_status: ok ? "confirmed" : "failed", chain_error: ok ? null : "TRANSACTION_REVERTED" });
+          outcome.chain = ok ? "confirmed" : "failed";
+          outcome.txHash = stored.tx_hash;
+          return outcome;
+        } catch (error) {
+          settlementPending = true;
+          outcome.chain = "submitted";
+          outcome.txHash = stored.tx_hash;
+          await patchObservation(supabase, observationId, { chain_error: `RECEIPT_PENDING:${describeError(error)}`.slice(0, 240) });
+          return outcome;
+        }
+      }
+    }
+
     // Target policy first, and outside the probe's error handling. A rejection here is a statement about the
     // guarantee's configuration, not about the endpoint's availability.
     let url: URL;
-    try {
-      ({ url } = await assertSafeTarget(claim.endpoint_url));
-    } catch (error) {
-      if (!(error instanceof TargetRejected)) throw error;
-      await recordUnmonitorable(supabase, claim, observationId, error.code, observedAt);
-      outcome.reason = error.code;
-      outcome.chain = "unmonitorable";
-      runError = describeError(error);
-      return outcome;
+    if (stored) {
+      // The stored row is already the result of a completed probe. Do not re-run DNS policy during a
+      // settlement retry; a later DNS answer must not change the observation being settled.
+      url = new URL(claim.endpoint_url);
+    } else {
+      try {
+        ({ url } = await assertSafeTarget(claim.endpoint_url));
+      } catch (error) {
+        if (!(error instanceof TargetRejected)) throw error;
+        await recordUnmonitorable(supabase, claim, observationId, error.code, Math.floor(Date.now() / 1000));
+        outcome.reason = error.code;
+        outcome.chain = "unmonitorable";
+        runError = describeError(error);
+        return outcome;
+      }
     }
 
     // Chain state before probing, so an already-settled slot is neither re-probed nor rewritten, and a
@@ -471,21 +532,24 @@ async function processClaim(supabase: SupabaseClient, claim: Claim): Promise<Out
       return outcome;
     }
 
-    const result = await probe(url, claim);
+    const result = stored
+      ? {
+        healthy: stored.healthy,
+        status: stored.http_status ?? 0,
+        latencyMs: stored.latency_ms ?? 0,
+        bodyDigest: stored.body_keccak256 ?? EMPTY_BODY_DIGEST,
+        reason: stored.error_code ?? "STORED_EVIDENCE",
+        observedAt: Math.floor(new Date(stored.observed_at).getTime() / 1000),
+      }
+      : await probe(url, claim);
     outcome.healthy = result.healthy;
     outcome.status = result.status;
     outcome.latencyMs = result.latencyMs;
     outcome.reason = result.reason;
 
-    const digest = evidenceHash({
-      guaranteeId: BigInt(claim.guarantee_id),
-      observationId,
-      url: url.toString(),
-      observedAt,
-      status: result.status,
-      latencyMs: result.latencyMs,
-      healthy: result.healthy,
-      reason: result.reason,
+    const digest = stored?.evidence_hash ?? evidenceHash({
+      guaranteeId: BigInt(claim.guarantee_id), observationId, url: url.toString(), observedAt: result.observedAt,
+      status: result.status, latencyMs: result.latencyMs, healthy: result.healthy, reason: result.reason,
       bodyDigest: result.bodyDigest,
     });
 
@@ -497,19 +561,20 @@ async function processClaim(supabase: SupabaseClient, claim: Claim): Promise<Out
       observation_id: observationId,
       guarantee_id: claim.guarantee_id,
       scheduled_for: claim.scheduled_for,
-      observed_at: new Date(observedAt * 1000).toISOString(),
+      observed_at: new Date(result.observedAt * 1000).toISOString(),
       healthy: result.healthy,
       http_status: result.status,
       latency_ms: result.latencyMs,
-      body_sha256: result.bodyDigest,
+      body_keccak256: result.bodyDigest,
       evidence_hash: digest,
       error_code: result.reason,
-    }, { onConflict: "observation_id" });
+    }, { onConflict: "observation_id", ignoreDuplicates: true });
     if (storeError) throw new Error(`OBSERVATION_STORE_FAILED:${storeError.message}`);
 
     if (!chain) {
       // Evidence is kept; the submission could not even be evaluated. The next slot tries again.
       outcome.chain = "failed";
+      settlementPending = true;
       await patchObservation(supabase, observationId, {
         tx_status: "failed",
         chain_error: (runError ?? "CHAIN_READ_FAILED").slice(0, 240),
@@ -518,9 +583,10 @@ async function processClaim(supabase: SupabaseClient, claim: Claim): Promise<Out
     }
 
     try {
-      const settled = await settleOnchain(supabase, claim, chain, observationId, digest, result, observedAt);
+      const settled = await settleOnchain(supabase, claim, chain, observationId, digest, result, result.observedAt);
       outcome.chain = settled.chain;
       outcome.txHash = settled.txHash;
+      settlementPending = settled.chain === "submitted";
     } catch (error) {
       // A chain failure must not discard the probe evidence, and must not be mistaken for a service failure.
       runError = describeError(error);
@@ -529,20 +595,24 @@ async function processClaim(supabase: SupabaseClient, claim: Claim): Promise<Out
         tx_status: "failed",
         chain_error: describeError(error).slice(0, 240),
       });
+      settlementPending = true;
     }
     return outcome;
   } catch (error) {
     runError = describeError(error);
     if (outcome.reason === "PENDING") outcome.reason = "MONITOR_ERROR";
+    // An unexpected failure is not proof that the slot completed. Leave it due so a later invocation can
+    // recover the same evidence if it was already persisted, or retry the probe if no evidence was committed.
+    settlementPending = true;
     return outcome;
   } finally {
-    // Always release the lease and advance the schedule, on every path including a thrown error. Skipping this
-    // would leave the guarantee permanently due and turn the cron into a hot loop against one endpoint.
+    // A chain failure leaves this exact slot claimable. Successful or explicitly non-chain outcomes advance it.
     const { error } = await supabase.rpc("complete_monitor_run", {
       p_guarantee_id: claim.guarantee_id,
       p_scheduled_for: claim.scheduled_for,
       p_claim_token: claim.claim_token,
       p_last_error: runError,
+      p_settlement_pending: settlementPending,
     });
     if (error) console.error(`lease_release_failed guarantee=${claim.guarantee_id} reason=${error.message}`);
   }

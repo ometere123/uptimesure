@@ -56,8 +56,10 @@ alter table public.observations
 alter table public.observations
   drop constraint if exists observations_body_sha256_shape;
 alter table public.observations
-  add constraint observations_body_sha256_shape
-  check (body_sha256 is null or body_sha256 ~ '^0x[0-9a-f]{64}$');
+  drop constraint if exists observations_body_keccak256_shape;
+alter table public.observations
+  add constraint observations_body_keccak256_shape
+  check (body_keccak256 is null or body_keccak256 ~ '^0x[0-9a-f]{64}$');
 
 alter table public.observations
   drop constraint if exists observations_tx_hash_shape;

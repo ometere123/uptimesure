@@ -1,5 +1,7 @@
 "use client";
 
+"use client";
+
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { connectWallet, createGuarantee, type FlowStage, publicClient, WalletConnection } from "@/lib/chain";
@@ -53,7 +55,8 @@ export default function CreatePage() {
   const [stage, setStage] = useState<FlowStage | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [created, setCreated] = useState<Created | null>(null);
-  const busy = stage !== null && stage !== "done";
+  const [preflight, setPreflight] = useState<string | null>(null);
+  const busy = (stage !== null && stage !== "done") || preflight !== null;
 
   const set = useCallback(<K extends keyof GuaranteeFormValues>(key: K, value: GuaranteeFormValues[K]) => {
     setValues((previous) => ({ ...previous, [key]: value }));
@@ -135,6 +138,22 @@ export default function CreatePage() {
       return;
     }
     setErrors({});
+
+    setPreflight("Checking HTTPS target policy and DNS answers…");
+    try {
+      const response = await fetch("/api/preflight", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: values.endpointUrl.trim() }) });
+      const result = await response.json() as { ok: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        setPreflight(null);
+        setFailure(`Monitor preflight refused this endpoint (${result.error ?? "PREFLIGHT_FAILED"}).`);
+        return;
+      }
+    } catch {
+      setPreflight(null);
+      setFailure("Monitor preflight could not verify DNS. Guarantee creation is blocked until it succeeds.");
+      return;
+    }
+    setPreflight(null);
 
     try {
       const result = await createGuarantee(connection, {
@@ -244,7 +263,7 @@ export default function CreatePage() {
               )}
             </label>
             <label>
-              Maximum latency (ms)
+              Maximum completed-response latency (ms)
               <input
                 type="number"
                 min={100}
@@ -410,6 +429,7 @@ export default function CreatePage() {
       ) : null}
 
       {stage && stage !== "done" ? <div className="notice">{STAGE_TEXT[stage]}</div> : null}
+      {preflight ? <div className="notice">{preflight}</div> : null}
       {failure ? <div className="notice notice-error">{failure}</div> : null}
 
       {created ? (

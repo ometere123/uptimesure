@@ -37,7 +37,7 @@ The frontend reads two independent sources: the contract over RPC, and the Supab
 
 **Base Sepolia contract** — provider and beneficiary, endpoint and deterministic monitoring terms, fully funded coverage, payout per incident and maximum payout count, observation replay/spacing/freshness guards, consecutive-failure and minimum-outage state, incident confirmation and recovery, remaining coverage, and the automatic beneficiary payout.
 
-**Supabase Edge Functions** — perform real HTTPS GET requests, cap timeout and response bytes, verify expected status/body fragment/latency, compute the evidence hash, submit an observation using a key holding only `MONITOR_ROLE`, and index contract state into the public read tables.
+**Supabase Edge Functions** — perform real public unauthenticated HTTPS GET requests, cap timeout and response bytes, verify expected status/body fragment/completed-response latency, compute immutable evidence, submit an observation using a key holding only `MONITOR_ROLE`, and index contract state into the public read tables.
 
 **Supabase Postgres** — a read model and evidence store. It is not authoritative for funds. Deleting a row does not alter coverage or contract state.
 
@@ -76,7 +76,7 @@ RECEIPT_TIMEOUT_MS   60_000
 Selection is **not** `select ... where next_check_at <= now()`. That pattern lets two overlapping invocations pick the same guarantee for the same slot and submit two observations for one scheduled check. Instead the function calls two `security definer` RPCs:
 
 - `claim_due_guarantees(p_limit, p_lease_seconds)` selects due rows `for update skip locked`, so a concurrent invocation steps over rows already being claimed instead of blocking behind them. It then inserts a `monitor_runs` row keyed `(guarantee_id, scheduled_for)`. That unique key is what makes a slot single-occupancy: the `on conflict do update` takeover fires only `where completed_at is null and lease_expires_at < now()`, so a live lease or an already-completed slot yields no row and the caller simply does not receive that guarantee this tick. Both arguments are clamped in SQL (limit 1–50, lease 30–900 seconds) rather than trusted from the caller.
-- `complete_monitor_run(p_guarantee_id, p_scheduled_for, p_claim_token, p_last_error)` releases the claim. The token fences a zombie worker: if its lease expired and another worker took over, its token no longer matches and the call becomes a no-op instead of corrupting the schedule.
+- `complete_monitor_run(..., p_settlement_pending)` either advances the schedule or leaves the exact slot immediately reclaimable for settlement retry. The token fences a zombie worker: if its lease expired and another worker took over, its token no longer matches and the call becomes a no-op instead of corrupting the schedule.
 
 `next_check_at` advances from the scheduled slot rather than from `now()`, so a slow run does not drift the cadence, and is clamped forward to at least `now()` so a long backlog cannot produce a tight retry loop.
 
@@ -97,13 +97,13 @@ CHAIN_ID               84532
 
 `sync-chain` starts from the recorded deployment block, never from genesis, and advances a persisted cursor through `advance_chain_cursor`. The cursor is monotonic — it moves forward via `greatest(...)`, so a retried or out-of-order invocation cannot rewind the read model.
 
-Only blocks at least `DEFAULT_CONFIRMATIONS` deep are treated as safe. Each run re-scans `REORG_OVERLAP` blocks behind the cursor so a shallow reorg is corrected by re-observing the canonical logs rather than requiring manual repair. Writes are upserts keyed on the identity of the event, which makes re-processing the same range a no-op instead of a duplicate row.
+Only blocks at least `DEFAULT_CONFIRMATIONS` deep are treated as safe. Each run re-scans `REORG_OVERLAP` blocks behind the cursor. Every event-derived row stores block number/hash, transaction/log identity and a canonical-presence flag; reprocessing marks orphaned chain projections invalid while preserving monitor-owned HTTP evidence. Contract state is read at the safe block where the RPC supports historical reads, and a failed chunk is never advanced past.
 
 `MAX_BLOCKS_PER_RUN` bounds a cold start: catching up a long gap takes several invocations and cannot produce one unbounded run.
 
 ## Evidence
 
-Each probe records HTTP status, latency, a digest of the bounded response body, an error code and the observed time.
+Each probe records HTTP status, completed bounded-response latency (headers plus body read), a digest of the bounded response body, an error code and `observed_at` set when that measurement completes. The database calls the digest `body_keccak256`; it is not SHA-256.
 
 The commitment is `keccak256(abi.encode(...))`, not a JSON or line-oriented digest, so the value can be recomputed inside the EVM by whoever wants to check it. Two domain separators namespace the two hashes:
 
@@ -131,6 +131,8 @@ unmonitorable   the target was refused by policy and never probed
 `not_required` is the common case. A healthy check does not need a transaction, so steady state costs no gas; chain writes are reserved for failures and for the first healthy check after a failure, which is what resets onchain state.
 
 `unmonitorable` exists because a policy refusal is not an outage. Such a row is stored with `healthy = false` (the column is not nullable and a constraint ties the two together), so the frontend renders it as **Refused**, never as a failure. Reporting a refused target as downtime would tell a provider their service broke when it was never probed at all.
+
+Settlement retry states are durable: `pending` means evidence exists but no broadcast is known, `submitted` means a transaction hash is known and receipt lookup is pending, and `failed` means the attempt can be retried unless the stored chain error is a definitive revert. The same observation id, timestamp, verdict, status, latency, body digest, reason and evidence hash are reused.
 
 ## Funding model
 

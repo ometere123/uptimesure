@@ -32,7 +32,7 @@ The constructor requires `monitor != msg.sender` and grants `DEFAULT_ADMIN_ROLE`
 - emergency pause is admin-only and halts observation processing
 - SafeERC20 and ReentrancyGuard protect every token movement path
 
-The 36 tests in `contracts/test/UptimeSureCore.test.ts` cover these paths, including the boundary cases: maximum representable payout and coverage without overflow, counter saturation, settlement inside the post-expiry window, withdrawal blocked while settlement is open, and re-entrancy from a malicious token. A further 6 in `contracts/test/deployment-constants.test.ts` guard the deployment constants, for 42 in the Hardhat suite.
+The contract suite currently passes 42 tests: 36 lifecycle/security tests in `contracts/test/UptimeSureCore.test.ts` and 6 deployment-constant tests.
 
 ## Endpoint safeguards (SSRF)
 
@@ -84,9 +84,9 @@ Two design points matter more than the pattern list. The scan enumerates objects
 
 ## Dependency posture
 
-The frontend and the Edge Functions report **zero known vulnerabilities**. Reaching that required upgrading `next` to 16.3.2 (which cleared four `postcss` advisories and the `sharp`/libvips CVEs), `viem` to 2.55.19 in both the frontend and the Edge Function import pins (clearing two `ws` advisories in the component that holds the monitor key), and `vitest` to 3.2.7 (clearing a critical advisory).
+The root project audit currently reports **0 vulnerabilities** with Next.js 16.3.3, viem 2.55.19 and vitest 3.2.7. The Edge Functions use the same pinned viem/supabase versions in their import URLs.
 
-`contracts/` still reports findings, and they are not silenced. `npm audit` there reports **42 advisories (20 low, 7 moderate, 15 high, 0 critical)**, arising from exactly eight packages: `undici`, `adm-zip`, `serialize-javascript`, `tmp`, `uuid`, `bn.js`, `cookie` and `elliptic`. Everything else in the report is a transitive path into one of those eight, so no root cause is undocumented here. Two further findings were fixed with scoped `overrides`: `ws` pinned to 8.21.3 under `@ethersproject/providers` (which pins an exact vulnerable version, so `npm audit fix` was a no-op), and `lodash` to 4.18.1 — both verified still applied, and `ws` no longer appears in the report at any version. The remaining eight sit inside the Hardhat 2 developer toolchain; `npm audit fix --force` resolves them only by installing `hardhat@3.14.0`, which it labels a breaking change.
+`contracts/` still reports findings, and they are not silenced. The current `npm audit` reports **42 vulnerabilities (20 low, 7 moderate, 15 high)**, arising from transitive Hardhat 2 build-tool paths including `undici`, `adm-zip`, `serialize-javascript`, `tmp`, `uuid`, `bn.js`, `cookie` and `elliptic`. The report offers a forced Hardhat 3/toolbox migration; it was not taken because it is breaking and the existing Solidity suite is green. This is a development/CI toolchain finding, not a deployed runtime dependency.
 
 That migration is deliberately not bundled with this release. The contracts package produces **no runtime artifact**: what deploys is compiled EVM bytecode, and these advisories are reachable only by a developer or CI runner executing the local toolchain against hostile input. Forcing incompatible versions inside Hardhat's own dependency tree risks breaking the 42-test suite that proves the settlement contract safe, which would be a worse security outcome than a build-time advisory. Overrides were applied only where the change stays within a major and a cold compile plus the full suite was re-verified afterwards. Migrating to Hardhat 3 is tracked as follow-up work, not as done.
 

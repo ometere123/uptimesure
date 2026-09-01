@@ -44,10 +44,12 @@ step "secrets: history scan" python scripts/scan-history-secrets.py
 # Mirrors the `database-schema` CI job. Skipped rather than failed when no local Postgres is installed, because
 # an absent server is a missing tool and not a defect in the schema — but CI always runs it, so a schema fault
 # cannot escape by being skipped here.
-if [ -x "${PGBIN:-/c/Program Files/PostgreSQL/18/bin}/psql" ] || command -v psql >/dev/null 2>&1; then
+if { [ -x "${PGBIN:-/c/Program Files/PostgreSQL/18/bin}/psql" ] || command -v psql >/dev/null 2>&1; } \
+  && command -v initdb >/dev/null 2>&1 \
+  && command -v pg_ctl >/dev/null 2>&1; then
   step "database: schema" bash scripts/verify-schema.sh
 else
-  printf '\n=== database: schema ===\nSKIP  no local psql; the database-schema CI job covers this\n'
+  printf '\n=== database: schema ===\nSKIP  no complete local PostgreSQL toolset; the database-schema CI job covers this\n'
 fi
 
 printf '\n===== %s =====\n' "$([ $fail -eq 0 ] && echo 'ALL CHECKS PASSED' || echo 'SOME CHECKS FAILED')"

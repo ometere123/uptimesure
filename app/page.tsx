@@ -42,13 +42,13 @@ export default function Home() {
       <section className="shell section split-section">
         <div>
           <p className="eyebrow">Designed for real infrastructure</p>
-          <h2>APIs, RPCs, webhooks and agent services.</h2>
+          <h2>Public HTTPS uptime guarantees.</h2>
         </div>
         <div className="principles card">
           <div><strong>Deterministic</strong><p>HTTP status, latency, body fragment, failure count and outage duration.</p></div>
           <div><strong>Bounded authority</strong><p>The monitoring key can only submit observations. It never custodies coverage.</p></div>
           <div><strong>Verifiable</strong><p>Evidence hashes, observations, incidents and payout transactions remain inspectable.</p></div>
-          <div><strong>Rialo-ready</strong><p>The monitoring/scheduling layer can later migrate to Rialo Workflow + REX without changing the product model.</p></div>
+          <div><strong>V1 scope</strong><p>Public unauthenticated HTTPS GET endpoints. Authenticated APIs, JSON-RPC POST checks and webhook delivery guarantees are future adapters.</p></div>
         </div>
       </section>
     </>
