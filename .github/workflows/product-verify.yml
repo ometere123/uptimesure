@@ -184,4 +184,9 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm --prefix contracts ci --no-audit --no-fund
       - name: Run verify-all.sh on Ubuntu
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 55432
+          PGUSER: postgres
+          PGPASSWORD: postgres
         run: bash scripts/verify-all.sh
