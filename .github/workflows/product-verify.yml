@@ -160,6 +160,8 @@ jobs:
     # Supabase-managed role shims that verify-all.sh cannot assume on a developer laptop.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
@@ -170,5 +172,9 @@ jobs:
           deno-version: v2.x
       - run: npm ci --no-audit --no-fund
       - run: npm --prefix contracts ci --no-audit --no-fund
+      - name: Install PostgreSQL server tools for verify-schema.sh
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql
       - name: Run verify-all.sh on Ubuntu
         run: bash scripts/verify-all.sh
